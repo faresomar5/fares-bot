@@ -68,3 +68,46 @@ export const safeJson = (s, fallback = null) => {
 
 /** تنسيق مدة بالمللي ثانية إلى نص عربي مختصر */
 export const fmtMs = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}ث` : `${Math.round(ms)}م.ث`);
+
+/**
+ * تقسيم نص طويل إلى مقاطع ضمن الحد المسموح (تيليجرام 4096 حرف)
+ * يقسم عند نهايات الأسطر إن أمكن ويتجنب قطع الوسوم في منتصفها
+ */
+export function chunkText(text, limit = 3900) {
+  const s = String(text ?? '');
+  if (s.length <= limit) return [s];
+  const chunks = [];
+  let cur = '';
+  const flush = () => {
+    if (cur) {
+      chunks.push(cur);
+      cur = '';
+    }
+  };
+  for (const line of s.split('\n')) {
+    if (line.length > limit) {
+      flush();
+      for (let i = 0; i < line.length; i += limit) chunks.push(line.slice(i, i + limit));
+      continue;
+    }
+    if (!cur) cur = line;
+    else if (cur.length + 1 + line.length <= limit) cur += '\n' + line;
+    else {
+      flush();
+      cur = line;
+    }
+  }
+  flush();
+  return chunks;
+}
+
+/** إرسال نص طويل على عدة رسائل (يعمل مع reply في تيليجرام وواتساب) */
+export async function sendLong(ctx, text, { header = '', pauseMs = 350, opts = {} } = {}) {
+  const parts = chunkText(text);
+  for (let i = 0; i < parts.length; i++) {
+    const t = i === 0 ? parts[0] : `${header ? header + '\n' : ''}📄 <b>تكملة (${i + 1}/${parts.length})</b>\n${parts[i]}`;
+    await ctx.reply(t, opts);
+    if (i < parts.length - 1) await delay(pauseMs);
+  }
+  return parts.length;
+}

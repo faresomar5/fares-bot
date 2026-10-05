@@ -8,8 +8,10 @@ const { Markup } = telegraf;
 const b = (text, data) => Markup.button.callback(text, data);
 
 /** اللوحة الرئيسية — 24 زر إدارة */
-export const mainMenu = () =>
-  Markup.inlineKeyboard([
+export const mainMenu = () => Markup.inlineKeyboard(mainMenuRows());
+
+/** صفوف القائمة الرئيسية (تُستعمل أيضاً تحت أزرار /start المخصصة) */
+export const mainMenuRows = () => [
     [b('🔗 ربط رقم جديد', 'act:connect'), b('❌ فصل الرقم', 'act:disconnect')],
     [b('📊 حالة الحساب', 'act:status'), b('🟢 تفاعل الحالات: تشغيل/إيقاف', 'act:toggle_react')],
     [b('😀 إيموجياتي', 'act:emoji_list'), b('➕ إضافة إيموجي', 'act:emoji_add')],
@@ -22,7 +24,7 @@ export const mainMenu = () =>
     [b('🔔 ساعات الهدوء', 'act:quiet'), b('📢 رسالة جماعية', 'act:broadcast')],
     [b('🧪 فحص الاتصال', 'act:ping'), b('⚙️ الإعدادات', 'act:settings')],
     [b('📜 قائمة الأوامر', 'act:help'), b('ℹ️ حول البوت', 'act:about')]
-  ]);
+];
 
 /** لوحة الإيموجيات مع أزرار الحذف السريع */
 export const emojiMenu = (emojis = []) => {
@@ -44,7 +46,7 @@ export const settingsMenu = () =>
     [b('🛡 الحماية', 'act:toggle_protect'), b('👁 إشعار القراءة', 'act:toggle_read')],
     [b('⌨️ محاكاة الكتابة', 'act:toggle_typing'), b('🗑 حذف الرسائل (antiDelete)', 'act:toggle_antidel')],
     [b('🔄 عكس ترتيب التفاعل', 'act:toggle_order'), b('⏱ ضبط التأخير', 'act:delay')],
-    [b('⬅️ رجوع', 'act:menu')]
+    [b('🔔 إشعار "تم التفاعل على حالة"', 'act:toggle_notify'), b('⬅️ رجوع', 'act:menu')]
   ]);
 
 /** لوحة إدارة المجموعات */

@@ -24,7 +24,8 @@ import {
 } from './wa.js';
 import * as dl from './downloader.js';
 import { publishTextStatus } from './status.js';
-import { cleanPhone, jidToNumber, fmtBytes, fmtUptime, randInt, escapeHtml, md5 } from './utils.js';
+import { cleanPhone, jidToNumber, fmtBytes, fmtUptime, randInt, escapeHtml, md5, sendLong } from './utils.js';
+import { isDeveloper, isMaintenanceOn } from './admin.js';
 
 export const registry = new Map();
 export const aliasMap = new Map();
@@ -37,6 +38,8 @@ export function reg(name, def) {
     desc: def.desc || '',
     usage: def.usage || `/${canonical}`,
     waOnly: !!def.waOnly,
+    devOnly: !!def.devOnly,
+    guard: !!def.guard,
     handler: def.handler || (async () => {}),
     aliases: def.aliases || []
   });
@@ -1061,8 +1064,9 @@ reg('platforms', {
  * ========================================================== */
 reg('allstats', {
   category: 'الإدارة',
-  desc: 'إحصائيات كل المستخدمين',
+  desc: 'إحصائيات كل المستخدمين (للمطور)',
   aliases: ['الاحصائيات_العامة'],
+  guard: true,
   handler: async (ctx) => {
     const g = globalStats();
     const users = store.all();
@@ -1084,8 +1088,9 @@ reg('allstats', {
 
 reg('sessions', {
   category: 'الإدارة',
-  desc: 'قائمة الجلسات النشطة',
+  desc: 'قائمة الجلسات النشطة (للمطور)',
   aliases: ['الجلسات'],
+  guard: true,
   handler: async (ctx) => {
     if (!sessions.size) return ctx.reply('ℹ️ لا توجد جلسات نشطة.');
     const rows = [...sessions.values()].map(
@@ -1097,8 +1102,9 @@ reg('sessions', {
 
 reg('kill', {
   category: 'الإدارة',
-  desc: 'فصل جلسة مستخدم',
+  desc: 'فصل جلسة مستخدم (للمطور)',
   usage: '/kill <tgId>',
+  guard: true,
   handler: async (ctx) => {
     if (!ctx.args[0]) return ctx.reply('🆔 اكتب آيدي المستخدم.');
     await stopSession(ctx.args[0], { logout: true });
@@ -1117,8 +1123,9 @@ reg('backup', {
 
 reg('userinfo', {
   category: 'الإدارة',
-  desc: 'تفاصيل مستخدم',
+  desc: 'تفاصيل مستخدم (للمطور)',
   usage: '/userinfo <tgId>',
+  guard: true,
   handler: async (ctx) => {
     const id = ctx.args[0] || ctx.tgId;
     const u = store.getUser(id);
@@ -1134,12 +1141,18 @@ reg('userinfo', {
 });
 
 /* ==========================================================
- *  9) تسجيل الأوامر الإضافية (300+)
+ *  9) أوامر المطور (/admin) والأوامر المميزة
+ * ========================================================== */
+import { regAdminCommands } from './admin.js';
+regAdminCommands({ reg, need, sockOf, isDeveloper, escapeHtml });
+
+/* ==========================================================
+ *  10) تسجيل الأوامر الإضافية (300+)
  * ========================================================== */
 for (const [name, def] of extras) reg(name, def);
 
 /* ==========================================================
- *  10) المحرك
+ *  11) المحرك
  * ========================================================== */
 const PREFIXES = ['/', '.', '!', '#'];
 
@@ -1164,13 +1177,23 @@ export async function runCommand(ctx) {
   const cmd = resolve(m[1]);
   if (!cmd) return false;
 
+  if (isMaintenanceOn() && !isDeveloper({ tgId: ctx.tgId })) {
+    await ctx.reply('🛠 <b>البوت في وضع الصيانة حالياً</b>\nحاول مرة أخرى لاحقاً.').catch(() => {});
+    return true;
+  }
+  if (cmd.guard && !isDeveloper({ tgId: ctx.tgId })) {
+    await ctx.reply('👑 <b>هذا الأمر خاص بمطور البوت فقط.</b>').catch(() => {});
+    return true;
+  }
+
   const argsStr = (m[2] || '').trim();
   const full = { ...ctx, args: argsStr ? argsStr.split(/\s+/).filter(Boolean) : [], argsStr, name: cmd.name };
 
   try {
     await cmd.handler(full);
   } catch (e) {
-    await ctx.reply(`❌ خطأ في تنفيذ <code>${cmd.name}</code>: ${escapeHtml(e.message)}`).catch(() => {});
+    const em = /message is too long/i.test(e?.description || e?.message || '') ? 'الرسالة أطول من الحد المسموح — تم تقطيعها تلقائياً، أعد المحاولة.' : e.message;
+    await ctx.reply(`❌ خطأ في تنفيذ <code>${cmd.name}</code>: ${escapeHtml(em)}`).catch(() => {});
     store.bump(ctx.tgId, 'errors');
   }
   return true;
@@ -1188,7 +1211,7 @@ export function listCommands() {
   const out = [];
   for (const [cat, list] of byCat) {
     out.push(`\n<b>◆ ${cat} (${list.length})</b>`);
-    out.push(list.map((c) => `<code>/${c.name}</code>${c.desc ? ' — ' + escapeHtml(c.desc) : ''}`).join('\n'));
+    out.push(list.map((c) => `<code>/${c.name}</code>${c.desc ? ' — ' + escapeHtml(c.desc) : ''}${c.devOnly ? ' 👑' : ''}`).join('\n'));
   }
   return out.join('\n');
 }

@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS = {
   groupWelcome: false,
   readReceipts: true, // إرسال إشعار القراءة
   typingSim: true, // محاكاة "يكتب..."
+  notifyStatusReaction: false, // إشعار تيليجرام "تم التفاعل على حالة" (معطّل افتراضياً)
   quietHours: { enabled: false, from: 2, to: 7 } // ساعات هدوء (لا تفاعل)
 };
 

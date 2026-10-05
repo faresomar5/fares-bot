@@ -3,7 +3,7 @@
  * تُصدّر مصفوفة [name, def] وتُسجّل داخل commands.js
  */
 import crypto from 'node:crypto';
-import { randInt, randomPick, escapeHtml, md5 as _md5 } from './utils.js';
+import { randInt, randomPick, escapeHtml, md5 as _md5, sendLong } from './utils.js';
 
 export const extras = [];
 const add = (name, def) => extras.push([name, def]);
@@ -271,9 +271,13 @@ media('gif', 'تحويل فيديو إلى GIF', '🎞 يحتاج ffmpeg: <code>
 /* ==========================================================
  *  أوامر مساعدة إضافية
  * ========================================================== */
-add('help', { category: 'النظام', desc: 'قائمة كل الأوامر', aliases: ['مساعدة', 'اوامر', 'menu', 'الأوامر'], handler: async (ctx) => {
+add('help', { category: 'النظام', desc: 'قائمة كل الأوامر', aliases: ['مساعدة', 'اوامر', 'الأوامر', 'الاوامر', 'menu'], handler: async (ctx) => {
   const { listCommands, countDistinct, countCommands } = await import('./commands.js');
-  await ctx.reply(`📜 <b>قائمة الأوامر</b>\n🔢 الأوامر الأساسية: <b>${countDistinct()}</b> | مع المرادفات: <b>${countCommands()}</b>\n${listCommands()}`);
+  // تقطيع تلقائي لتفادي خطأ "message is too long" في تيليجرام
+  await sendLong(
+    ctx,
+    `📜 <b>قائمة الأوامر</b>\n🔢 الأوامر الأساسية: <b>${countDistinct()}</b> | مع المرادفات: <b>${countCommands()}</b>\n${listCommands()}`
+  );
 } });
 
 add('version', { category: 'النظام', desc: 'إصدار البوت', aliases: ['اصدار'], handler: async (ctx) => ctx.reply(`⚙️ إصدار البوت: <b>1.0.0</b>\n📦 Node: ${process.version}`) });

@@ -36,7 +36,7 @@ export const CONFIG = {
   LOG_LEVEL: process.env.LOG_LEVEL || 'silent',
   YTDLP_BIN: process.env.YTDLP_BIN || 'yt-dlp',
 
-  VERSION: '1.0.0',
+  VERSION: '1.1.0',
   STARTED_AT: Date.now()
 };
 

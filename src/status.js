@@ -62,7 +62,7 @@ export function attachStatusEngine(sock, tgId, hooks = {}) {
           continue;
         }
 
-        await reactToStatus(sock, tgId, m, s, log, notify);
+        await reactToStatus(sock, tgId, m, s, log, s.notifyStatusReaction ? notify : null);
       } catch (e) {
         store.bump(tgId, 'errors');
         log(`خطأ في معالجة الحالة: ${e.message}`);
@@ -129,6 +129,7 @@ export async function reactToStatus(sock, tgId, m, settings, log = () => {}, not
     }
   }
 
+  // إشعار تيليجرام عند التفاعل — مُعطّل افتراضياً (notify = null يعني لا رسالة)
   if (notify) notify(tgId, `👀 تم التفاعل على حالة <b>${jidToNumber(sender)}</b>`);
 }
 
