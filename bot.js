@@ -30,12 +30,15 @@ import {
 } from './src/wa.js';
 import { setNotifier } from './src/wa.js';
 import { runCommand, countDistinct, countCommands } from './src/commands.js';
+import { sendLong, chunkText } from './src/utils.js';
+import { startButtonRows, getDevButton, getStartText, adminMenuKb, isDeveloper, getDevDb } from './src/admin.js';
 import * as kb from './src/keyboards.js';
 import * as dl from './src/downloader.js';
 
 assertConfig();
 
 const bot = new Telegraf(CONFIG.BOT_TOKEN);
+globalThis.__tgBot = bot; // يسمح لأوامر المطور بالإذاعة من أي سياق
 
 /* ==========================================================
  *  إشعارات من واتساب إلى تيليجرام
@@ -138,9 +141,17 @@ const WELCOME = (ctx) => {
   );
 };
 
+/** كيبورد /start: أزرار المطور المخصصة (إن وجدت) + القائمة الرئيسية */
+const startKb = () => {
+  const rows = startButtonRows();
+  if (!rows.length) return kb.mainMenu();
+  return Markup.inlineKeyboard([...rows, ...kb.mainMenuRows()]);
+};
+
 bot.start(async (ctx) => {
   store.getUser(tgIdOf(ctx));
-  await reply(ctx, WELCOME(ctx), kb.mainMenu());
+  const custom = getStartText();
+  await reply(ctx, custom ? `${escapeHtml(custom)}` : WELCOME(ctx), startKb());
 });
 
 bot.command('menu', async (ctx) => {
@@ -150,13 +161,131 @@ bot.command('menu', async (ctx) => {
 
 bot.command('help', async (ctx) => {
   const { listCommands } = await import('./src/commands.js');
-  await reply(ctx, `📜 <b>الأوامر المتاحة</b>\n${listCommands()}`, kb.backMenu());
+  const full = `📜 <b>الأوامر المتاحة</b>\n${listCommands()}`;
+  // تقطيع تلقائي لتجنب خطأ message is too long
+  const parts = chunkText(full);
+  for (let i = 0; i < parts.length; i++) {
+    await reply(ctx, i === 0 ? parts[i] : `📜 <b>الأوامر المتاحة (تكملة ${i + 1}/${parts.length})</b>\n${parts[i]}`);
+    if (i < parts.length - 1) await new Promise((r) => setTimeout(r, 300));
+  }
+  await kbReplyMenu(ctx);
 });
+
+const kbReplyMenu = async (ctx) => ctx.reply('⬇️ اختر من القائمة:', kb.mainMenu()).catch(() => {});
 
 /* ==========================================================
  *  معالجات الأزرار
  * ========================================================== */
 const A = (data, fn) => bot.action(data, fn);
+
+/* ---- أزرار /start المخصصة + لوحة المطور ---- */
+A(/^devbtn:(\w+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const btn = getDevButton(ctx.match[1]);
+  if (!btn) return reply(ctx, '⚠️ هذا الزر لم يعد موجوداً (ربما حُذف).');
+  await reply(ctx, btn.content.slice(0, 4000), kb.backMenu());
+});
+
+A('adm:setstart', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isDeveloper(ctx)) return ctx.answerCbQuery('للمطور فقط 👑').catch(() => {});
+  const db = getDevDb();
+  setFlow(tgIdOf(ctx), 'adm_setstart');
+  await reply(
+    ctx,
+    `✏️ <b>تغيير رسالة /start</b>\n\n` +
+      `النص الحالي: ${db.startMessage ? '<i>مخصص</i>' : '<i>افتراضي</i>'}\n\n` +
+      `أرسل النص الجديد الآن، أو أرسل <code>افتراضي</code> للعودة للرسالة الافتراضية.`,
+    kb.backMenu()
+  );
+});
+
+A('adm:addbtn', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isDeveloper(ctx)) return ctx.answerCbQuery('للمطور فقط 👑').catch(() => {});
+  setFlow(tgIdOf(ctx), 'adm_btnname');
+  await reply(ctx, '➕ <b>إضافة زر جديد تحت /start</b>\n\n1️⃣ أرسل <b>اسم الزر</b> أولاً:', kb.backMenu());
+});
+
+A('adm:delbtn', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isDeveloper(ctx)) return ctx.answerCbQuery('للمطور فقط 👑').catch(() => {});
+  const db = getDevDb();
+  if (!db.buttonOrder.length) return safeEdit(ctx, 'ℹ️ لا توجد أزرار مخصصة.', adminMenuKb());
+  const rows = db.buttonOrder.map((id, i) => [Markup.button.callback(`🗑 ${i + 1}. ${db.buttons[id]?.name || id}`, `adm:btdel:${id}`)]);
+  rows.push([Markup.button.callback('💣 حذف الكل', 'adm:btdelall'), Markup.button.callback('⬅️ رجوع', 'adm:back')]);
+  await safeEdit(ctx, '🗑 <b>اضغط على الزر الذي تريد حذفه</b>', Markup.inlineKeyboard(rows));
+});
+
+A(/^adm:btdel:(\w+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isDeveloper(ctx)) return;
+  const db = getDevDb();
+  const id = ctx.match[1];
+  const name = db.buttons[id]?.name;
+  delete db.buttons[id];
+  db.buttonOrder = db.buttonOrder.filter((x) => x !== id);
+  await safeEdit(ctx, name ? `🗑 تم حذف الزر «<b>${escapeHtml(name)}</b>».` : '🗑 تم الحذف.', adminMenuKb());
+});
+
+A('adm:btdelall', async (ctx) => {
+  await ctx.answerCbQuery('تم الحذف').catch(() => {});
+  if (!isDeveloper(ctx)) return;
+  const db = getDevDb();
+  const n = db.buttonOrder.length;
+  db.buttons = {};
+  db.buttonOrder = [];
+  await safeEdit(ctx, n ? `🗑 تم حذف كل الأزرار (${n}).` : 'ℹ️ لا توجد أزرار.', adminMenuKb());
+});
+
+A('adm:back', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isDeveloper(ctx)) return;
+  await safeEdit(ctx, '👑 <b>لوحة تحكم المطور</b>', adminMenuKb());
+});
+
+A('adm:devcmds', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isDeveloper(ctx)) return;
+  const { DEV_COMMANDS } = await import('./src/admin.js');
+  const text =
+    `👑 <b>أوامر المطور المميزة (13)</b>\n━━━━━━━━━━━━━━━\n` +
+    DEV_COMMANDS.map((c, i) => `${i + 1}. <code>/${c.n}</code> — ${c.d}`).join('\n');
+  await safeEdit(ctx, text, adminMenuKb());
+});
+
+A('adm:devstats', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isDeveloper(ctx)) return;
+  const handled = await runCommand(tgCommandCtx(ctx, '/devstats'));
+  if (!handled) await safeEdit(ctx, '⚠️ لم يتم العثور على الأمر.', adminMenuKb());
+});
+
+A('adm:tgbcast', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isDeveloper(ctx)) return;
+  setFlow(tgIdOf(ctx), 'adm_tgbcast');
+  await reply(ctx, '📢 <b>إذاعة مشتركي تيليجرام</b>\n\nأرسل نص الإذاعة الآن:', kb.backMenu());
+});
+
+A('adm:wabcast', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isDeveloper(ctx)) return;
+  setFlow(tgIdOf(ctx), 'adm_wabcast');
+  await reply(ctx, '📱 <b>إذاعة الأرقام المربوطة</b>\n\nأرسل نص الإذاعة الآن:', kb.backMenu());
+});
+
+A('adm:maintenance', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isDeveloper(ctx)) return;
+  const db = getDevDb();
+  db.maintenance = !db.maintenance;
+  await safeEdit(
+    ctx,
+    db.maintenance ? '🛠 <b>تم تشغيل وضع الصيانة</b> — الأوامر متاحة للمطور فقط.' : '✅ <b>تم إيقاف وضع الصيانة</b> — البوت متاح للجميع.',
+    adminMenuKb()
+  );
+});
 
 A('act:menu', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
@@ -251,8 +380,8 @@ A('do:logout', async (ctx) => {
 });
 
 /* ---- مفاتيح التشغيل ---- */
-const toggle = (key, labels) =>
-  A(`act:toggle_${key}`, async (ctx) => {
+const toggle = (key, labels, data = null) =>
+  A(data || `act:toggle_${key}`, async (ctx) => {
     const tgId = tgIdOf(ctx);
     const u = store.getUser(tgId);
     const val = !u.settings[key];
@@ -274,6 +403,19 @@ toggle('typingSim', ['محاكاة الكتابة', '⌨️ تم تفعيل مح
 toggle('antiDelete', ['مكافحة حذف الرسائل', '🛡 سيتم التقاط الرسائل المحذوفة', '⚪ تم إيقاف مكافحة الحذف']);
 toggle('groupWelcome', ['ترحيب الأعضاء الجدد', '👋 تم تفعيل الترحيب', '⚪ تم إيقاف الترحيب']);
 toggle('keepCustomEmojiLast', ['ترتيب التفاعل', '🔄 القلب الأخضر أولاً ثم الإيموجي', '🔄 الإيموجي المخصص أولاً ثم القلب']);
+
+/* أزرار لوحة الإعدادات تستخدم أسماء callback مختلفة — نربطها بنفس المفاتيح */
+toggle('autoReact', ['التفاعل التلقائي على الحالات', '🟢 تم تشغيل التفاعل التلقائي', '🔴 تم إيقاف التفاعل التلقائي'], 'act:toggle_react');
+toggle('greenHeart', ['القلب الأخضر 💚', '💚 تم تشغيل القلب الأخضر', '⚪ تم إيقاف القلب الأخضر'], 'act:toggle_heart');
+toggle('viewFirst', ['مشاهدة الحالة قبل التفاعل', '👀 سيتم مشاهدة الحالة أولاً', '⚪ تم إيقاف المشاهدة المسبقة'], 'act:toggle_view');
+toggle('keepCustomEmojiLast', ['ترتيب التفاعل', '🔄 تم عكس ترتيب التفاعل', '🔄 تم إعادة الترتيب الافتراضي'], 'act:toggle_order');
+toggle('readReceipts', ['إشعارات القراءة', '👁 تم تفعيل إشعار القراءة', '🙈 تم إيقاف إشعار القراءة'], 'act:toggle_read');
+toggle('typingSim', ['محاكاة الكتابة', '⌨️ تم تفعيل محاكاة الكتابة', '⚪ تم إيقاف محاكاة الكتابة'], 'act:toggle_typing');
+toggle('antiDelete', ['مكافحة حذف الرسائل', '🛡 سيتم التقاط الرسائل المحذوفة', '⚪ تم إيقاف مكافحة الحذف'], 'act:toggle_antidel');
+toggle('groupWelcome', ['ترحيب الأعضاء الجدد', '👋 تم تفعيل الترحيب', '⚪ تم إيقاف الترحيب'], 'act:toggle_welcome');
+
+/* إشعار "تم التفاعل على حالة" — مُعطّل افتراضياً ويمكن تشغيله من هنا */
+toggle('notifyStatusReaction', ['إشعار التفاعل على الحالات', '🔔 تم تشغيل إشعار «تم التفاعل على حالة»', '🔕 تم إيقاف إشعار «تم التفاعل على حالة»'], 'act:toggle_notify');
 
 /* ---- الإيموجيات ---- */
 A('act:emoji_list', async (ctx) => {
@@ -639,6 +781,85 @@ bot.on('text', async (ctx) => {
       return;
     }
 
+    if (flow.step === 'adm_setstart') {
+      if (!isOwner(ctx)) return;
+      const db = getDevDb();
+      if (/^(افتراضي|reset|الافتراضي)$/i.test(text)) {
+        db.startMessage = null;
+        clearFlow(tgId);
+        return reply(ctx, '♻️ تمت استعادة رسالة /start الافتراضية.', adminMenuKb());
+      }
+      db.startMessage = text.slice(0, 3000);
+      clearFlow(tgId);
+      return reply(ctx, '✅ تم حفظ رسالة /start الجديدة.\n👁 للمعاينة أرسل <code>/start</code>', adminMenuKb());
+    }
+
+    if (flow.step === 'adm_btnname') {
+      if (!isOwner(ctx)) return;
+      if (text.length > 40) return reply(ctx, '⚠️ اسم الزر طويل جداً (الحد 40 حرفاً). أرسل اسماً أقصر.');
+      setFlow(tgId, 'adm_btncontent', { name: text.trim() });
+      return reply(ctx, `✍️ الاسم: «<b>${escapeHtml(text.trim())}</b>»\n\n2️⃣ الآن أرسل <b>محتوى الرسالة</b> التي ستصل للضاغط على الزر:`);
+    }
+
+    if (flow.step === 'adm_btncontent') {
+      if (!isOwner(ctx)) return;
+      const name = flow.data?.name;
+      if (!name) {
+        clearFlow(tgId);
+        return reply(ctx, '⚠️ انتهت الجلسة. ابدأ من جديد عبر /admin.');
+      }
+      const db = getDevDb();
+      const id = `b${Date.now().toString(36)}${Math.floor(Math.random() * 900 + 100)}`;
+      db.buttons[id] = { id, name, content: text.slice(0, 3800), createdAt: Date.now() };
+      db.buttonOrder.push(id);
+      clearFlow(tgId);
+      return reply(
+        ctx,
+        `✅ تم حفظ الزر «<b>${escapeHtml(name)}</b>» تحت رسالة /start.\nأي شخص يضغط عليه سيستلم الرسالة التي أضفتها.\n\n👁 للمعاينة: <code>/start</code>`,
+        adminMenuKb()
+      );
+    }
+
+    if (flow.step === 'adm_tgbcast') {
+      if (!isOwner(ctx)) return;
+      clearFlow(tgId);
+      const users = store.all();
+      const wait = await reply(ctx, `📢 جاري الإذاعة إلى ${users.length} مشترك في تيليجرام...`);
+      let ok = 0;
+      for (const u of users) {
+        try {
+          await bot.telegram.sendMessage(u.id, `📢 <b>إذاعة من المطور</b>\n━━━━━━━━━━━━━━━\n${text}`, { parse_mode: 'HTML', disable_web_page_preview: true });
+          ok++;
+        } catch {
+          /* محظور أو غير موجود */
+        }
+        await new Promise((r) => setTimeout(r, 300 + Math.random() * 600));
+      }
+      return ctx.telegram.editMessageText(ctx.chat.id, wait.message_id, undefined, `✅ تمت الإذاعة إلى ${ok}/${users.length} مشترك.`).catch(() => {});
+    }
+
+    if (flow.step === 'adm_wabcast') {
+      if (!isOwner(ctx)) return;
+      clearFlow(tgId);
+      const targets = [...(await import('./src/wa.js')).sessions.values()].filter((s) => s.status === 'connected');
+      if (!targets.length) return reply(ctx, 'ℹ️ لا توجد أرقام مربوطة حالياً.');
+      const wait = await reply(ctx, `📢 جاري الإذاعة إلى ${targets.length} رقم مربوط...`);
+      let ok = 0;
+      for (const rec of targets) {
+        try {
+          const n = rec.sock?.user?.id ? String(rec.sock.user.id).split('@')[0].split(':')[0] : rec.phone;
+          if (n) {
+            await rec.sock.sendMessage(`${n}@s.whatsapp.net`, { text: `📱 رسالة من مطور البوت\n━━━━━━━━━━━━━━━\n${text}` });
+            ok++;
+          }
+        } catch {
+          /* ignore */
+        }
+        await new Promise((r) => setTimeout(r, 800 + Math.random() * 1200));
+      }
+      return ctx.telegram.editMessageText(ctx.chat.id, wait.message_id, undefined, `✅ تمت الإذاعة إلى ${ok}/${targets.length} رقم.`).catch(() => {});
+    }
+
     if (flow.step === 'emoji_add') {
       const added = [];
       const u = store.getUser(tgId);
@@ -762,7 +983,7 @@ bot.on('text', async (ctx) => {
     }
   }
 
-  /* 2) الأوامر */
+  /* 2) الأوامر (شاملة .الاوامر وكل البادئات) */
   if (['/', '.', '!', '#'].includes(text[0])) {
     const handled = await runCommand(tgCommandCtx(ctx, text));
     if (handled) return;
@@ -803,7 +1024,8 @@ bot.on('text', async (ctx) => {
 bot.catch((err, ctx) => {
   const e = err?.response?.description || err?.message || String(err);
   console.error('[telegraf]', e);
-  if (ctx?.reply) ctx.reply(`⚠️ حدث خطأ: ${escapeHtml(e)}`).catch(() => {});
+  const msg = /message is too long/i.test(e) ? '⚠️ الرسالة أطول من حد تيليجرام — سيتم تقطيعها تلقائياً عند إعادة المحاولة.' : `⚠️ حدث خطأ: ${escapeHtml(e)}`;
+  if (ctx?.reply) ctx.reply(msg).catch(() => {});
 });
 
 /* ==========================================================
@@ -844,13 +1066,14 @@ async function bootstrap() {
   await setMyCommands([
     { command: 'start', description: 'القائمة الرئيسية والأزرار' },
     { command: 'menu', description: 'عرض لوحة التحكم' },
+    { command: 'help', description: 'قائمة كل الأوامر' },
     { command: 'pair', description: 'ربط رقم عبر كود الاقتران' },
     { command: 'status', description: 'حالة الحساب المربوط' },
     { command: 'emojis', description: 'إدارة إيموجيات التفاعل' },
     { command: 'addemoji', description: 'إضافة إيموجي جديد' },
     { command: 'gc', description: 'تنظيف الذاكرة' },
     { command: 'stats', description: 'إحصائيات التفاعل' },
-    { command: 'help', description: 'قائمة كل الأوامر' }
+    { command: 'admin', description: '👑 لوحة المطور (خاص)' }
   ]).catch(() => {});
 }
 
