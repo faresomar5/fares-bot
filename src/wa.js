@@ -18,6 +18,7 @@ import path from 'node:path';
 import { CONFIG, sessionDir } from './config.js';
 import { store } from './store.js';
 import { attachStatusEngine, seenCount, seen } from './status.js';
+import { attachGuards } from './guard.js';
 import { cleanPhone, delay, randInt, jidToNumber } from './utils.js';
 
 const logger = P({ level: CONFIG.LOG_LEVEL });
@@ -28,6 +29,11 @@ export const sessions = new Map();
 let notifier = () => {};
 export const setNotifier = (fn) => {
   if (typeof fn === 'function') notifier = fn;
+};
+
+let mediaNotifier = async () => {};
+export const setMediaNotifier = (fn) => {
+  if (typeof fn === 'function') mediaNotifier = fn;
 };
 
 export const getSession = (tgId) => sessions.get(String(tgId)) || null;
@@ -190,6 +196,17 @@ async function openSocket(tgId, { onCode = () => {}, onEvent = () => {} } = {}) 
       attachStatusEngine(sock, id, {
         log: (msg) => console.log(`[WA ${id}] ${msg}`),
         notify: (uid, text) => notifier(uid, text)
+      });
+
+      // أوامر داخل الرقم المربوط (.الاوامر وغيرها) — استيراد ديناميكي لتجنب الدوران
+      const { attachWaCommands } = await import('./commands.js');
+      attachWaCommands(sock, id, (uid, text) => notifier(uid, text));
+
+      // وحدة الحماية: كشف الحذف لدى الجميع + حماية الحالات + كشف العرض لمرة واحدة
+      attachGuards(sock, id, {
+        log: (msg) => console.log(`[WA ${id}] ${msg}`),
+        notify: (uid, text) => notifier(uid, text),
+        notifyMedia: (uid, buf, mime, text) => mediaNotifier(uid, buf, mime, text)
       });
 
       onEvent('open', num);

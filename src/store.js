@@ -18,6 +18,9 @@ export const DEFAULT_SETTINGS = {
   emojis: ['❤️', '🔥', '👏', '😍', '💯', '😂', '🙏', '💚'],
   protection: true, // وضع الحماية (تقييد السرعة + تجاهل الرسائل الجماعية)
   antiDelete: false, // إعادة إرسال الرسائل المحذوفة (للمجموعات الخاصة)
+  waAntiDelete: false, // كشف حذف الرسائل «لدى الجميع» وإرسالها كاملة للمحادثة
+  statusAntiDelete: false, // عدم حذف حالات الواتساب — إرسال الحالة المحذوفة كاملة
+  viewOnceReveal: false, // كشف الصور/الفيديو «العرض لمرة واحدة» وإرسالها
   autoReply: false, // ردود آلية
   autoReplies: {}, // { "كلمة": "الرد" }
   blocked: [], // أرقام محظورة
@@ -25,10 +28,22 @@ export const DEFAULT_SETTINGS = {
   readReceipts: true, // إرسال إشعار القراءة
   typingSim: true, // محاكاة "يكتب..."
   notifyStatusReaction: false, // إشعار تيليجرام "تم التفاعل على حالة" (معطّل افتراضياً)
+  delGuardMsgs: false, // التقاط حذف الرسائل لدى الجميع وإرسالها كاملة
+  delGuardStatus: false, // التقاط حذف حالات الواتس وإرسالها كاملة
+  revealViewOnce: false, // كشف رسائل "عرض مره واحده" وإرسالها كاملة
   quietHours: { enabled: false, from: 2, to: 7 } // ساعات هدوء (لا تفاعل)
 };
 
 const EMPTY = () => ({ users: {}, global: { createdAt: Date.now() } });
+
+const MIGRATIONS = [
+  // ترقية قواعد بيانات قديمة: إضافة المفاتيح الجديدة دون حذف الإعدادات الموجودة
+  (u) => {
+    for (const k of ['waAntiDelete', 'statusAntiDelete', 'viewOnceReveal']) {
+      if (u.settings[k] === undefined) u.settings[k] = DEFAULT_SETTINGS[k];
+    }
+  }
+];
 
 let db = EMPTY();
 let timer = null;
@@ -82,6 +97,7 @@ export const store = {
     }
     const u = db.users[k];
     u.settings = { ...DEFAULT_SETTINGS, ...(u.settings || {}) };
+    for (const mig of MIGRATIONS) try { mig(u); } catch {}
     u.stats = { viewed: 0, reacted: 0, errors: 0, connects: 0, startedAt: null, ...(u.stats || {}) };
     return u;
   },

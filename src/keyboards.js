@@ -45,8 +45,10 @@ export const settingsMenu = () =>
     [b('💚 القلب الأخضر', 'act:toggle_heart'), b('🔔 ساعات الهدوء', 'act:quiet')],
     [b('🛡 الحماية', 'act:toggle_protect'), b('👁 إشعار القراءة', 'act:toggle_read')],
     [b('⌨️ محاكاة الكتابة', 'act:toggle_typing'), b('🗑 حذف الرسائل (antiDelete)', 'act:toggle_antidel')],
-    [b('🔄 عكس ترتيب التفاعل', 'act:toggle_order'), b('⏱ ضبط التأخير', 'act:delay')],
-    [b('🔔 إشعار "تم التفاعل على حالة"', 'act:toggle_notify'), b('⬅️ رجوع', 'act:menu')]
+    [b('🛡 كشف الحذف لدى الجميع', 'act:toggle_wadel'), b('📸 عدم حذف الحالات', 'act:toggle_wast')],
+    [b('👁 كشف العرض لمرة واحدة', 'act:toggle_vonce'), b('⏱ ضبط التأخير', 'act:delay')],
+    [b('🔄 عكس ترتيب التفاعل', 'act:toggle_order'), b('🔔 إشعار «تم التفاعل على حالة»', 'act:toggle_notify')],
+    [b('⬅️ رجوع', 'act:menu')]
   ]);
 
 /** لوحة إدارة المجموعات */

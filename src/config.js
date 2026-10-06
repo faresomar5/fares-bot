@@ -4,8 +4,11 @@
 import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = process.cwd();
+// الجذر = مجلد المشروع نفسه (وليس مجلد التشغيل) — حتى لا تُفقد الجلسات والإعدادات
+// عند إعادة تشغيل السيرفر من مجلد مختلف (مثل systemd أو pm2 من مسار آخر)
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const num = (v, d) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
@@ -36,7 +39,7 @@ export const CONFIG = {
   LOG_LEVEL: process.env.LOG_LEVEL || 'silent',
   YTDLP_BIN: process.env.YTDLP_BIN || 'yt-dlp',
 
-  VERSION: '1.1.0',
+  VERSION: '1.2.0',
   STARTED_AT: Date.now()
 };
 

@@ -45,6 +45,34 @@ export async function ytdlpAvailable() {
 }
 
 /**
+ * تثبيت yt-dlp تلقائياً إذا لم تكن موجودة (pip install -U yt-dlp)
+ * تُستدعى عند إقلاع البوت — لا توقف الإقلاع عند الفشل
+ */
+export async function ensureYtdlp() {
+  if (await ytdlpAvailable()) return true;
+  console.log('⚙️ yt-dlp غير مثبت — جاري التثبيت التلقائي (pip install -U yt-dlp)...');
+  const cmds = [
+    ['python3', ['-m', 'pip', 'install', '-U', 'yt-dlp']],
+    ['pip3', ['install', '-U', 'yt-dlp']],
+    ['pip', ['install', '-U', 'yt-dlp']]
+  ];
+  for (const [bin, args] of cmds) {
+    try {
+      await run(bin, args, { timeout: 300_000, maxBuffer: 16 * 1024 * 1024 });
+      cachedAvailable = null;
+      if (await ytdlpAvailable()) {
+        console.log('✅ تم تثبيت yt-dlp بنجاح.');
+        return true;
+      }
+    } catch {
+      /* جرب الطريقة التالية */
+    }
+  }
+  console.error('❌ تعذر تثبيت yt-dlp تلقائياً. ثبّته يدوياً: pip install -U yt-dlp');
+  return false;
+}
+
+/**
  * تحميل وسائط
  * @param {string} url رابط الفيديو/الصوت
  * @param {{audio?:boolean, quality?:string, timeout?:number}} opts

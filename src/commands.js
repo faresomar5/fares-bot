@@ -642,6 +642,50 @@ reg('antidelete', {
   }
 });
 
+/* ---- حمايات الرقم المربوط (تُرسل التقارير في محادثة الرقم المربوط) ---- */
+const guardToggle = (name, key, desc, onMsg, offMsg, aliases = []) =>
+  reg(name, {
+    category: 'الحماية',
+    desc,
+    aliases,
+    handler: async (ctx) => {
+      const u = store.getUser(ctx.tgId);
+      let v;
+      if (/^(on|تشغيل|تفعيل|1)$/i.test(ctx.argsStr)) v = true;
+      else if (/^(off|ايقاف|إيقاف|0)$/i.test(ctx.argsStr)) v = false;
+      else v = !u.settings[key];
+      store.updateSettings(ctx.tgId, { [key]: v });
+      await ctx.reply(v ? onMsg : offMsg);
+    }
+  });
+
+guardToggle(
+  'delguard',
+  'delGuardMsgs',
+  'تشغيل/إيقاف التقاط حذف الرسائل لدى الجميع',
+  '🛡 <b>تم تشغيل مراقبة حذف الرسائل لدى الجميع</b>\nأي شخص يحذف رسالته (نص/صورة/فيديو/صوت/ملصق/ملف) سترسل الرسالة كاملة مع معلومات صاحبها ورقمه الفعلي في محادثة الرقم المربوط.',
+  '⚪ تم إيقاف مراقبة حذف الرسائل لدى الجميع.',
+  ['حذف_الرسائل', 'امسح_رسائل', 'delguard']
+);
+
+guardToggle(
+  'statusguard',
+  'delGuardStatus',
+  'تشغيل/إيقاف عدم حذف حالات الواتس',
+  '📵 <b>تم تشغيل مراقبة حذف الحالات</b>\nأي شخص يحذف حالته (نص/صورة/فيديو) سترسل الحالة كاملة مع معلومات صاحبها ورقمه الفعلي في محادثة الرقم المربوط.',
+  '⚪ تم إيقاف مراقبة حذف الحالات.',
+  ['حذف_الحالات', 'عدم_حذف_الحالات', 'statusguard']
+);
+
+guardToggle(
+  'viewonce',
+  'revealViewOnce',
+  'تشغيل/إيقاف كشف رسائل العرض لمرة واحدة',
+  '👁 <b>تم تشغيل كشف العرض لمرة واحدة</b>\nأي صورة/فيديو تُرسل بوضع «عرض مره واحده» ستُكشف وترسل كاملة مع معلومات المُرسل ورقمه الفعلي في محادثة الرقم المربوط.',
+  '⚪ تم إيقاف كشف العرض لمرة واحدة.',
+  ['كشف_الرسائل', 'عرض_مره_واحده', 'viewonce']
+);
+
 /* ==========================================================
  *  5) المجموعات
  * ========================================================== */
@@ -1150,6 +1194,92 @@ regAdminCommands({ reg, need, sockOf, isDeveloper, escapeHtml });
  *  10) تسجيل الأوامر الإضافية (300+)
  * ========================================================== */
 for (const [name, def] of extras) reg(name, def);
+
+/* ==========================================================
+ *  10.5) أوامر الرقم المربوط (تعمل داخل واتساب وتيليجرام)
+ *  - .الاوامر : عرض كل الأوامر المتاحة داخل الرقم المربوط
+ *  - .الحذف   : تشغيل/إيقاف كشف حذف الرسائل «لدى الجميع»
+ *  - .الحالات : تشغيل/إيقاف «عدم حذف حالات الواتساب»
+ *  - .كشف     : تشغيل/إيقاف كشف «العرض لمرة واحدة»
+ * ========================================================== */
+const waOnOff = (v) => (v ? '✅ مُفعّل' : '❌ متوقف');
+
+reg('menulive', {
+  category: 'الرقم المربوط',
+  desc: 'عرض جميع أوامر الرقم المربوط داخل واتساب',
+  aliases: ['الاوامر', 'الأوامر', 'اوامر_الرقم', 'الاوامر_المربوط'],
+  handler: async (ctx) => {
+    const byCat = new Map();
+    for (const c of registry.values()) {
+      if (c.devOnly) continue;
+      if (!byCat.has(c.category)) byCat.set(c.category, []);
+      byCat.get(c.category).push(c);
+    }
+    let out = '*📜 أوامر الرقم المربوط*\n━━━━━━━━━━━━━━━\n';
+    for (const [cat, list] of byCat) {
+      out += `\n◆ *${cat}* (${list.length})\n`;
+      out += list.map((c) => `.${c.name}${c.desc ? ' — ' + c.desc : ''}`).join('\n');
+      out += '\n';
+    }
+    out += '\n━━━━━━━━━━━━━━━\n💡 يعمل الأمر بكل البادئات: . / ! #';
+    const { chunkText } = await import('./utils.js');
+    for (const part of chunkText(out, 3500)) {
+      await ctx.reply(part);
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+});
+
+reg('wadelete', {
+  category: 'الرقم المربوط',
+  desc: 'تشغيل/إيقاف كشف حذف الرسائل لدى الجميع',
+  usage: '.الحذف',
+  aliases: ['الحذف', 'حذف_الرسائل', 'كشف_الحذف', 'wadelete'],
+  handler: async (ctx) => {
+    const u = store.getUser(ctx.tgId);
+    const v = !u.settings.waAntiDelete;
+    store.updateSettings(ctx.tgId, { waAntiDelete: v });
+    await ctx.reply(
+      v
+        ? '🛡 *تم تشغيل كشف حذف الرسائل لدى الجميع*\n\nأي شخص يحذف رسالة سيتم إرسال معلومات الرسالة كاملة (نص، صور، فيديو) مع معلومات صاحبها ورقمه الفعلي إلى محادثة الرقم المربوط.'
+        : '⚪ *تم إيقاف كشف حذف الرسائل.*'
+    );
+  }
+});
+
+reg('wastatussave', {
+  category: 'الرقم المربوط',
+  desc: 'تشغيل/إيقاف عدم حذف حالات الواتساب',
+  usage: '.الحالات',
+  aliases: ['الحالات', 'حالات_الواتس', 'حماية_الحالات', 'wastatussave'],
+  handler: async (ctx) => {
+    const u = store.getUser(ctx.tgId);
+    const v = !u.settings.statusAntiDelete;
+    store.updateSettings(ctx.tgId, { statusAntiDelete: v });
+    await ctx.reply(
+      v
+        ? '📸 *تم تشغيل «عدم حذف حالات الواتساب»*\n\nأي شخص يحذف حالته (نص/صورة/فيديو) سيتم إرسالها كاملة مع معلومات صاحبها ورقمه الفعلي إلى محادثة الرقم المربوط.'
+        : '⚪ *تم إيقاف حماية الحالات.*'
+    );
+  }
+});
+
+reg('viewonce', {
+  category: 'الرقم المربوط',
+  desc: 'تشغيل/إيقاف كشف الرسائل «للعرض لمرة واحدة»',
+  usage: '.كشف',
+  aliases: ['كشف', 'عرض_لمره_واحده', 'كشف_العرض', 'viewonce'],
+  handler: async (ctx) => {
+    const u = store.getUser(ctx.tgId);
+    const v = !u.settings.viewOnceReveal;
+    store.updateSettings(ctx.tgId, { viewOnceReveal: v });
+    await ctx.reply(
+      v
+        ? '👁 *تم تشغيل كشف «العرض لمرة واحدة»*\n\nأي شخص يرسل صورة أو فيديو للعرض لمرة واحدة سيتم كشفها وإرسالها إلى محادثة الرقم المربوط مع معلومات المرسل ورقمه الفعلي.'
+        : '⚪ *تم إيقاف كشف «العرض لمرة واحدة».*'
+    );
+  }
+});
 
 /* ==========================================================
  *  11) المحرك
