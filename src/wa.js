@@ -2,7 +2,12 @@
  * wa.js — مدير جلسات واتساب (Baileys Multi-Device)
  * - ربط بكود الاقتران (8 أرقام) بدون QR
  * - إعادة اتصال تلقائية بخوارزمية backoff
+ * - جلسات دائمة على القرص (PERSIST_ROOT) لا تُحذف بإعادة التشغيل
  * - إعدادات مُحسّنة للسيرفرات الضعيفة (100 رقم)
+ *
+ * ✳️ الجديد:
+ *  - لا رسالة «تم ربط الرقم بنجاح» إلا إذا فعّلها المستخدم (notifyOnConnect).
+ *  - التنبيهات (حذف/حالات/عرض لمرة واحدة) تُرسل لمحادثة الرقم المربوط نفسه.
  */
 import makeWASocket, {
   useMultiFileAuthState,
@@ -19,6 +24,7 @@ import { CONFIG, sessionDir } from './config.js';
 import { store } from './store.js';
 import { attachStatusEngine, seenCount, seen } from './status.js';
 import { attachGuards } from './guard.js';
+import { createAlerter } from './alerts.js';
 import { cleanPhone, delay, randInt, jidToNumber } from './utils.js';
 
 const logger = P({ level: CONFIG.LOG_LEVEL });
@@ -29,11 +35,6 @@ export const sessions = new Map();
 let notifier = () => {};
 export const setNotifier = (fn) => {
   if (typeof fn === 'function') notifier = fn;
-};
-
-let mediaNotifier = async () => {};
-export const setMediaNotifier = (fn) => {
-  if (typeof fn === 'function') mediaNotifier = fn;
 };
 
 export const getSession = (tgId) => sessions.get(String(tgId)) || null;
@@ -47,23 +48,17 @@ function socketOptions(state, version) {
   return {
     version,
     logger,
-    // مفتاح تحسين الأداء: كاش داخلي لتقليل قراءة/كتابة المفاتيح على القرص
     auth: {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, logger)
     },
-    // متصفح سطح مكتب — مطلوب لتفعيل كود الاقتران بشكل مستقر
     browser: Browsers.ubuntu('Chrome'),
-    // ===== توفير الذاكرة =====
-    syncFullHistory: false, // لا نحمّل كل تاريخ المحادثات
-    markOnlineOnConnect: false, // لا نُظهر الحساب "متصل دائماً"
-    generateHighQualityLinkPreview: false, // يوفّر المعالجة
-    // لا نخزّن الرسائل في الذاكرة إطلاقاً
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+    generateHighQualityLinkPreview: false,
     getMessage: async () => undefined,
     cachedGroupMetadata: async () => undefined,
-    // تجاهل قنوات النشر لتقليل الضجيج
     shouldIgnoreJid: (jid) => typeof jid === 'string' && jid.endsWith('@newsletter'),
-    // إبقاء الحد الأدنى من معلومات الحضور
     keepAliveIntervalMs: 30_000,
     connectTimeoutMs: 60_000,
     defaultQueryTimeoutMs: 60_000,
@@ -89,7 +84,6 @@ export async function startPairing(tgId, phone, onCode = () => {}, onEvent = () 
     throw new Error(`تم الوصول للحد الأقصى (${CONFIG.MAX_SESSIONS} رقم). افصل رقماً آخر أولاً.`);
   }
 
-  // إيقاف أي جلسة سابقة لنفس المستخدم
   await stopSession(tgId).catch(() => {});
 
   const rec = {
@@ -168,7 +162,6 @@ async function openSocket(tgId, { onCode = () => {}, onEvent = () => {} } = {}) 
   sock.ev.on('connection.update', async (u) => {
     const { connection, lastDisconnect, qr } = u;
 
-    // طلب كود الاقتران عند أول ظهور للـ qr ولم يكن الجهاز مربوطاً
     if (qr && !rec.pairingRequested && !sock.authState.creds.registered) {
       rec.pairingRequested = true;
       try {
@@ -198,19 +191,28 @@ async function openSocket(tgId, { onCode = () => {}, onEvent = () => {} } = {}) 
         notify: (uid, text) => notifier(uid, text)
       });
 
-      // أوامر داخل الرقم المربوط (.الاوامر وغيرها) — استيراد ديناميكي لتجنب الدوران
+      // أوامر داخل الرقم المربوط (.الاوامر وغيرها)
       const { attachWaCommands } = await import('./commands.js');
       attachWaCommands(sock, id, (uid, text) => notifier(uid, text));
 
-      // وحدة الحماية: كشف الحذف لدى الجميع + حماية الحالات + كشف العرض لمرة واحدة
+      // وحدة الحماية + موجّه التنبيهات
+      const alert = createAlerter(sock, id);
       attachGuards(sock, id, {
         log: (msg) => console.log(`[WA ${id}] ${msg}`),
-        notify: (uid, text) => notifier(uid, text),
-        notifyMedia: (uid, buf, mime, text) => mediaNotifier(uid, buf, mime, text)
+        alert
       });
 
       onEvent('open', num);
-      notifier(id, `✅ تم ربط الرقم بنجاح!\n📱 الرقم: <b>${num || rec.phone}</b>\n🟢 حالة التفاعل: ${u.settings.autoReact ? 'مفعّل' : 'متوقف'}`);
+
+      // 🔕 رسالة الربط — متوقفة افتراضياً (تُرسل فقط إذا فعّلها المستخدم)
+      if (u.settings.notifyOnConnect) {
+        notifier(
+          id,
+          `✅ تم ربط الرقم بنجاح!\n📱 الرقم: <b>${num || rec.phone}</b>\n🟢 حالة التفاعل: ${
+            u.settings.autoReact ? 'مفعّل' : 'متوقف'
+          }`
+        );
+      }
     }
 
     if (connection === 'close') {
@@ -230,7 +232,6 @@ async function openSocket(tgId, { onCode = () => {}, onEvent = () => {} } = {}) 
         return;
       }
 
-      // إعادة اتصال تلقائية مع backoff تدريجي
       rec.attempts += 1;
       const wait = Math.min(2 ** Math.min(rec.attempts, 6) * 1000 + randInt(500, 2500), 60_000);
       rec.status = 'reconnecting';
@@ -268,7 +269,7 @@ async function openSocket(tgId, { onCode = () => {}, onEvent = () => {} } = {}) 
 
         for (const [trigger, reply] of Object.entries(u.settings.autoReplies)) {
           if (text.toLowerCase().includes(trigger.toLowerCase())) {
-            await delay(randInt(700, 2200)); // تأخير بشري قبل الرد
+            await delay(randInt(700, 2200));
             await sock.sendMessage(jid, { text: reply }, { quoted: m });
             break;
           }
@@ -305,7 +306,7 @@ export async function resumeSession(tgId, onEvent = () => {}) {
   return true;
 }
 
-/** فصل الجلسة */
+/** فصل الجلسة (بدون حذف بياناتها) */
 export async function stopSession(tgId, { logout = false } = {}) {
   const id = String(tgId);
   const rec = sessions.get(id);
@@ -381,7 +382,6 @@ export function sessionSize(tgId) {
 
 /**
  * حارس الذاكرة: تشغيل GC دوري + تفريغ الكاشات
- * يسمح للسيرفرات الضعيفة باستيعاب عدد كبير من الأرقام
  */
 export function startMemoryGuard() {
   let sweeps = 0;
@@ -391,13 +391,9 @@ export function startMemoryGuard() {
       const heapMB = mem.heapUsed / 1048576;
       const rssMB = mem.rss / 1048576;
 
-      // 1) تفريغ ذاكرة الحالات المكررة
       if (seenCount() > 5000) seenClear();
-
-      // 2) تشغيل جامع القمامة إن كان متاحاً
       if (typeof global.gc === 'function') global.gc();
 
-      // 3) تنظيف مجلد tmp بشكل دوري
       sweeps++;
       if (sweeps % 5 === 0) cleanTmp();
 

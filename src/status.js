@@ -7,9 +7,8 @@
  *   3) إرسال الإيموجي المخصص (react على status@broadcast + statusJidList)
  *   4) إرسال القلب الأخضر 💚 (اختياري)
  *
- * ملاحظة مهمة (صريحة): واتساب يسمح بتفاعل واحد فقط لكل رسالة/حالة.
- * لذلك إرسال إيموجي ثم قلب أخضر يعني أن الأخير هو الذي يبقى ظاهراً.
- * يمكن عكس الترتيب من الإعدادات keepCustomEmojiLast.
+ * ملاحظة: واتساب يسمح بتفاعل واحد فقط لكل حالة؛ الأخير هو الذي يبقى ظاهراً.
+ * الإشعار «تم التفاعل على حالة» مُعطّل افتراضياً (notifyStatusReaction).
  */
 import { store } from './store.js';
 import { randInt, delay, jidToNumber, randomPick } from './utils.js';
@@ -33,9 +32,6 @@ const inQuietHours = (s) => {
 
 /**
  * ربط محرك الحالات بسوكيت معيّن
- * @param {import('@whiskeysockets/baileys').WASocket} sock
- * @param {string|number} tgId
- * @param {{log?:Function, notify?:Function}} hooks
  */
 export function attachStatusEngine(sock, tgId, hooks = {}) {
   const log = hooks.log || (() => {});
@@ -77,9 +73,8 @@ export function attachStatusEngine(sock, tgId, hooks = {}) {
 export async function reactToStatus(sock, tgId, m, settings, log = () => {}, notify = () => {}) {
   const s = settings || store.getUser(tgId).settings;
   const sender = m.key.participant;
-  const statusJidList = [sender]; // من سيستلم التفاعل
+  const statusJidList = [sender];
 
-  // 1) مشاهدة الحالة أولاً (سلوك بشري طبيعي)
   if (s.viewFirst) {
     try {
       await sock.readMessages([m.key]);
@@ -89,7 +84,6 @@ export async function reactToStatus(sock, tgId, m, settings, log = () => {}, not
   }
   store.bump(tgId, 'viewed');
 
-  // 2) انتظار بشري قبل التفاعل
   const waitMs = randInt(s.reactDelayMin * 1000, s.reactDelayMax * 1000) + randInt(300, 2500);
   await delay(waitMs);
 
@@ -98,11 +92,7 @@ export async function reactToStatus(sock, tgId, m, settings, log = () => {}, not
 
   const sendReact = async (emoji, label) => {
     try {
-      await sock.sendMessage(
-        'status@broadcast',
-        { react: { text: emoji, key: m.key } },
-        { statusJidList }
-      );
+      await sock.sendMessage('status@broadcast', { react: { text: emoji, key: m.key } }, { statusJidList });
       store.bump(tgId, 'reacted');
       log(`تفاعل بـ ${emoji} (${label}) على حالة ${jidToNumber(sender)}`);
       return true;
@@ -114,14 +104,12 @@ export async function reactToStatus(sock, tgId, m, settings, log = () => {}, not
   };
 
   if (s.keepCustomEmojiLast) {
-    // الترتيب المعكوس: القلب أولاً ثم الإيموجي المخصص
     if (s.greenHeart) await sendReact(GREEN, 'القلب الأخضر');
     if (custom && custom !== GREEN) {
       await delay(randInt(1200, 3500));
       await sendReact(custom, 'إيموجي مخصص');
     }
   } else {
-    // الترتيب الافتراضي: الإيموجي المخصص ثم القلب الأخضر
     if (custom) await sendReact(custom, 'إيموجي مخصص');
     if (s.greenHeart) {
       await delay(randInt(1200, 3500));
@@ -129,11 +117,10 @@ export async function reactToStatus(sock, tgId, m, settings, log = () => {}, not
     }
   }
 
-  // إشعار تيليجرام عند التفاعل — مُعطّل افتراضياً (notify = null يعني لا رسالة)
   if (notify) notify(tgId, `👀 تم التفاعل على حالة <b>${jidToNumber(sender)}</b>`);
 }
 
-/** تفاعل يدوي على حالة محددة (يُستدعى من الأوامر) */
+/** تفاعل يدوي على حالة محددة */
 export async function manualReact(sock, m, emoji) {
   return sock.sendMessage(
     'status@broadcast',
@@ -142,7 +129,7 @@ export async function manualReact(sock, m, emoji) {
   );
 }
 
-/** نشر حالة نصية (ميزة إضافية) */
+/** نشر حالة نصية */
 export async function publishTextStatus(sock, text, jidList = []) {
   return sock.sendMessage(
     'status@broadcast',

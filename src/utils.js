@@ -12,11 +12,44 @@ export const cleanPhone = (s) => String(s ?? '').replace(/\D/g, '');
 
 export const jidToNumber = (jid) => String(jid ?? '').split('@')[0].split(':')[0];
 
+export const isLid = (jid) => /@lid$/i.test(String(jid ?? ''));
+
+/** رقم هاتف صالح؟ (8 إلى 15 خانة) */
+export const isPhoneNumber = (n) => /^\d{8,15}$/.test(String(n ?? ''));
+
 export const escapeHtml = (s) =>
   String(s ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+
+/** إزالة وسوم HTML (لإرسال النص داخل واتساب) */
+export const stripHtml = (s) =>
+  String(s ?? '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(b|i|code|pre|strong|em)>/gi, '')
+    .replace(/<(b|i|code|pre|strong|em)>/gi, '')
+    .replace(/<[^>]+>/g, '');
+
+/**
+ * بناء رسالة تنبيه واحدة تُنسَّق حسب القناة (واتساب أو تيليجرام)
+ * @param {{title:string, fields:Array<{icon?:string,label:string,value:string,code?:boolean}>, notes?:string[]}} alert
+ * @param {'wa'|'tg'} target
+ */
+export function formatAlert({ title, fields = [], notes = [] }, target = 'wa') {
+  const bold = (s) => (target === 'tg' ? `<b>${escapeHtml(s)}</b>` : `*${s}*`);
+  const code = (s) => (target === 'tg' ? `<code>${escapeHtml(s)}</code>` : String(s));
+  const out = [bold(title), '━━━━━━━━━━━━━━━'];
+  for (const f of fields) {
+    const val = f.code ? code(f.value) : target === 'tg' ? escapeHtml(String(f.value)) : String(f.value);
+    out.push(`${f.icon ? `${f.icon} ` : ''}${f.label}: ${val}`);
+  }
+  if (notes.length) {
+    out.push('━━━━━━━━━━━━━━━');
+    for (const n of notes) out.push(target === 'tg' ? escapeHtml(n) : n);
+  }
+  return out.join('\n');
+}
 
 export const chunk = (arr, n) => {
   const out = [];

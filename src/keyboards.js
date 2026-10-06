@@ -12,18 +12,18 @@ export const mainMenu = () => Markup.inlineKeyboard(mainMenuRows());
 
 /** صفوف القائمة الرئيسية (تُستعمل أيضاً تحت أزرار /start المخصصة) */
 export const mainMenuRows = () => [
-    [b('🔗 ربط رقم جديد', 'act:connect'), b('❌ فصل الرقم', 'act:disconnect')],
-    [b('📊 حالة الحساب', 'act:status'), b('🟢 تفاعل الحالات: تشغيل/إيقاف', 'act:toggle_react')],
-    [b('😀 إيموجياتي', 'act:emoji_list'), b('➕ إضافة إيموجي', 'act:emoji_add')],
-    [b('🗑 حذف إيموجي', 'act:emoji_del'), b('♻️ إعادة تعيين الإيموجيات', 'act:emoji_reset')],
-    [b('💚 القلب الأخضر', 'act:toggle_heart'), b('👀 مشاهدة الحالة أولاً', 'act:toggle_view')],
-    [b('⏱ تأخير التفاعل', 'act:delay'), b('🛡 وضع الحماية', 'act:toggle_protect')],
-    [b('🚫 قائمة الحظر', 'act:blocklist'), b('👥 إدارة المجموعات', 'act:groups')],
-    [b('🤖 الردود الآلية', 'act:autoreply'), b('📥 تحميل الوسائط', 'act:downloader')],
-    [b('🧹 تنظيف الذاكرة', 'act:gc'), b('📈 إحصائيات', 'act:stats')],
-    [b('🔔 ساعات الهدوء', 'act:quiet'), b('📢 رسالة جماعية', 'act:broadcast')],
-    [b('🧪 فحص الاتصال', 'act:ping'), b('⚙️ الإعدادات', 'act:settings')],
-    [b('📜 قائمة الأوامر', 'act:help'), b('ℹ️ حول البوت', 'act:about')]
+  [b('🔗 ربط رقم جديد', 'act:connect'), b('❌ فصل الرقم', 'act:disconnect')],
+  [b('📊 حالة الحساب', 'act:status'), b('🟢 تفاعل الحالات: تشغيل/إيقاف', 'act:toggle_react')],
+  [b('😀 إيموجياتي', 'act:emoji_list'), b('➕ إضافة إيموجي', 'act:emoji_add')],
+  [b('🗑 حذف إيموجي', 'act:emoji_del'), b('♻️ إعادة تعيين الإيموجيات', 'act:emoji_reset')],
+  [b('💚 القلب الأخضر', 'act:toggle_heart'), b('👀 مشاهدة الحالة أولاً', 'act:toggle_view')],
+  [b('⏱ تأخير التفاعل', 'act:delay'), b('🛡 وضع الحماية', 'act:toggle_protect')],
+  [b('🚫 قائمة الحظر', 'act:blocklist'), b('👥 إدارة المجموعات', 'act:groups')],
+  [b('🤖 الردود الآلية', 'act:autoreply'), b('📥 تحميل الوسائط', 'act:downloader')],
+  [b('🧹 تنظيف الذاكرة', 'act:gc'), b('📈 إحصائيات', 'act:stats')],
+  [b('🔔 ساعات الهدوء', 'act:quiet'), b('📢 رسالة جماعية', 'act:broadcast')],
+  [b('🧪 فحص الاتصال', 'act:ping'), b('⚙️ الإعدادات', 'act:settings')],
+  [b('📜 قائمة الأوامر', 'act:help'), b('ℹ️ حول البوت', 'act:about')]
 ];
 
 /** لوحة الإيموجيات مع أزرار الحذف السريع */
@@ -48,7 +48,16 @@ export const settingsMenu = () =>
     [b('🛡 كشف الحذف لدى الجميع', 'act:toggle_wadel'), b('📸 عدم حذف الحالات', 'act:toggle_wast')],
     [b('👁 كشف العرض لمرة واحدة', 'act:toggle_vonce'), b('⏱ ضبط التأخير', 'act:delay')],
     [b('🔄 عكس ترتيب التفاعل', 'act:toggle_order'), b('🔔 إشعار «تم التفاعل على حالة»', 'act:toggle_notify')],
-    [b('⬅️ رجوع', 'act:menu')]
+    [b('🔔 التنبيهات (حذف/حالات/عرض)', 'act:toggle_alerts'), b('1️⃣ إرسال لمرة واحدة', 'act:toggle_once')],
+    [b('📍 وجهة التنبيهات', 'act:alertsto'), b('⚡ إشعار أوامر واتساب', 'act:toggle_wacmd')],
+    [b('🔕 رسالة الربط عند الإقلاع', 'act:toggle_connectmsg'), b('⬅️ رجوع', 'act:menu')]
+  ]);
+
+/** لوحة وجهة التنبيهات */
+export const alertsMenu = () =>
+  Markup.inlineKeyboard([
+    [b('💬 واتساب (محادثة الرقم المربوط)', 'alt:wa'), b('🤖 تيليجرام', 'alt:tg')],
+    [b('🔀 الاثنان معاً', 'alt:both'), b('⬅️ رجوع', 'act:settings')]
   ]);
 
 /** لوحة إدارة المجموعات */

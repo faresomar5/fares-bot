@@ -1,20 +1,17 @@
 /**
  * guard.js — وحدة الحماية والكشف للرقم المربوط
  *
- * 1) كشف حذف الرسائل «لدى الجميع» — عند حذف أي شخص لرسالته يتم إرسال
- *    معلومات الرسالة كاملة (نص + وسائط/صور/فيديو) مع معلومات صاحب الرسالة
- *    ورقمه الفعلي الصحيح إلى محادثة الرقم المربوط في تيليجرام.
- * 2) حماية حالات الواتساب — عند حذف أي شخص لحالته (نص/صورة/فيديو)
- *    تُرسل الحالة كاملة مع معلومات صاحبها ورقمه الفعلي.
- * 3) كشف «العرض لمرة واحدة» — أي صورة/فيديو مرسلة بوضع view-once
- *    تُكشف وتُرسل كاملة مع معلومات المرسل ورقمه الفعلي.
+ * 1) كشف حذف الرسائل «لدى الجميع» — تُرسل الرسالة كاملة (نص + وسائط) مع
+ *    معلومات صاحبها ورقمه الفعلي الصحيح (يدعم LID) إلى محادثة الرقم المربوط
+ *    داخل واتساب (أو تيليجرام حسب الإعداد) — ولمرة واحدة فقط.
+ * 2) حماية حالات الواتساب — عند حذف أي شخص لحالته تُرسل الحالة كاملة.
+ * 3) كشف «العرض لمرة واحدة» — تُكشف الصورة/الفيديو وتُرسل كاملة.
  *
- * كل المفاتيح تُتحكم بها بأوامر داخل الرقم المربوط (.الحذف، .الحالات، .كشف)
- * أو من تيليجرام، والإعدادات محفوظة في قاعدة البيانات ولا تُحذف بإعادة التشغيل.
+ * التحكم من داخل الرقم المربوط: .الحذف  .الحالات  .كشف
  */
 import { downloadMediaMessage } from '@whiskeysockets/baileys';
 import { store } from './store.js';
-import { jidToNumber, escapeHtml } from './utils.js';
+import { jidToNumber, isPhoneNumber, escapeHtml } from './utils.js';
 
 const CACHE_TTL = 60 * 60 * 1000; // ساعة واحدة
 const MAX_CACHE = 600; // حد أقصى للرسائل المخزنة لكل جلسة
@@ -39,7 +36,6 @@ const cacheFor = (map, tgId) => {
   if (!map.has(k)) map.set(k, new Map());
   const mm = map.get(k);
   if (mm.size >= MAX_CACHE) {
-    // إزالة الأقدم أولاً
     let oldest = null;
     for (const [id, e] of mm) if (!oldest || e.ts < oldest[1].ts) oldest = [id, e];
     if (oldest) mm.delete(oldest[0]);
@@ -47,33 +43,52 @@ const cacheFor = (map, tgId) => {
   return mm;
 };
 
+/* ==========================================================
+ *  الرقم الفعلي الصحيح (يدعم LID والأنظمة الجديدة)
+ * ========================================================== */
+const pickNumber = (...cands) => {
+  for (const c of cands) {
+    const n = jidToNumber(c);
+    if (isPhoneNumber(n)) return n;
+  }
+  return '';
+};
+
 /**
- * الرقم الفعلي الصحيح للمرسل — يتعامل مع أنظمة LID الحديثة في واتساب
- * ويعيد الرقم الدولي الكامل بدون رموز (مثال: 966501234567)
+ * استخراج الرقم الفعلي للمرسل من رسالة واتساب.
+ * يجرب: participantAlt → remoteJidAlt → senderPn/participantPn → participant → remoteJid
+ * ويعيد رقماً دولياً صالحاً (8-15 خانة) أو '' إن تعذّر.
  */
 export function realNumber(m) {
   const k = m?.key || {};
-  const p = k.participant || k.remoteJid || '';
-  let n = jidToNumber(p);
-  if ((/@lid$/i.test(p) || !/^\d{6,}$/.test(n)) && k.participantAlt) {
-    const alt = jidToNumber(k.participantAlt);
-    if (/^\d{6,}$/.test(alt)) return alt;
-  }
-  if (!/^\d{6,}$/.test(n) && k.remoteJidAlt) {
-    const alt = jidToNumber(k.remoteJidAlt);
-    if (/^\d{6,}$/.test(alt)) return alt;
-  }
-  return n;
+  return pickNumber(
+    k.participantAlt,
+    k.remoteJidAlt,
+    m?.senderPn,
+    m?.participantPn,
+    m?.participant,
+    k.participant,
+    m?.senderLid && !/@lid$/i.test(String(m.senderLid)) ? m.senderLid : null,
+    k.remoteJid
+  );
 }
+
+/** الرقم الفعلي من مفتاح رسالة (لأحداث الحذف) */
+export function realNumberFromKey(k = {}, extra = {}) {
+  return pickNumber(k.participantAlt, k.remoteJidAlt, extra.senderPn, extra.participantPn, k.participant, k.remoteJid);
+}
+
+/** عرض الرقم بشكل موحّد */
+const fmtNum = (n) => (n ? `+${n}` : 'غير معروف');
 
 const senderName = (m) => String(m?.pushName || m?.verifiedBizName || '').trim() || 'غير معروف';
 
 const chatLabel = (jid) => {
   if (!jid) return 'غير معروفة';
   if (jid === 'status@broadcast') return 'حالة واتساب 📱';
-  if (jid.endsWith('@g.us')) return `مجموعة 👥 (<code>${jid}</code>)`;
+  if (jid.endsWith('@g.us')) return `مجموعة 👥`;
   if (jid.endsWith('@newsletter')) return 'قناة 📢';
-  return `محادثة خاصة 💬 (<code>+${jidToNumber(jid)}</code>)`;
+  return 'محادثة خاصة 💬';
 };
 
 /** فك تغليف رسائل viewOnce إلى المحتوى الداخلي */
@@ -83,10 +98,10 @@ export const unwrap = (msg) => {
     if (m.viewOnceMessage?.message) m = m.viewOnceMessage.message;
     else if (m.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
     else if (m.viewOnceMessageV2Extension?.message) m = m.viewOnceMessageV2Extension.message;
-    else if (m.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
+    else if (m.ephemeralMessage?.message) m = m.ephemeralMessage.message;
     else break;
   }
-  return m || msg || {};
+  return m || {};
 };
 
 const isViewOnceMsg = (message) => {
@@ -106,14 +121,22 @@ const mediaNodeOf = (msg) => {
     return {
       node: c.documentMessage,
       kind: `ملف 📄 (${escapeHtml(c.documentMessage.fileName || 'بدون اسم')})`,
-      mime: c.documentMessage.mimetype || 'application/octet-stream'
+      mime: c.documentMessage.mimetype || 'application/octet-stream',
+      filename: c.documentMessage.fileName || 'file'
     };
   return null;
 };
 
 const msgTextOf = (msg) => {
   const c = unwrap(msg);
-  return c.conversation || c.extendedTextMessage?.text || c.imageMessage?.caption || c.videoMessage?.caption || c.documentMessage?.caption || '';
+  return (
+    c.conversation ||
+    c.extendedTextMessage?.text ||
+    c.imageMessage?.caption ||
+    c.videoMessage?.caption ||
+    c.documentMessage?.caption ||
+    ''
+  );
 };
 
 const timeNow = () => new Date().toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' });
@@ -127,16 +150,18 @@ async function dlBuffer(sock, m) {
   });
 }
 
+/* ==========================================================
+ *  ربط وحدة الحماية بسوكيت جلسة
+ * ========================================================== */
 /**
- * ربط وحدة الحماية بسوكيت جلسة
  * @param sock جلسة Baileys
  * @param tgId آيدي تيليجرام الخاص بالجلسة
- * @param hooks {log, notify, notifyMedia}
+ * @param hooks {log, notify, notifyMedia, alert}
+ *   alert = { send(key, alertObj, media) } من alerts.js
  */
 export function attachGuards(sock, tgId, hooks = {}) {
   const log = hooks.log || (() => {});
-  const notify = hooks.notify || (() => {});
-  const notifyMedia = hooks.notifyMedia || (async () => {});
+  const alert = hooks.alert || { send: async () => false };
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
@@ -163,7 +188,7 @@ export function attachGuards(sock, tgId, hooks = {}) {
       return handleMessageDelete(m, pm, s);
     }
 
-    if (key.fromMe) return; // رسائلی الصادرة لا تُخزَّن ولا تُكشَف
+    if (key.fromMe) return; // رسائلنا الصادرة لا تُخزَّن ولا تُكشَف
 
     /* ===== 2) كشف العرض لمرة واحدة ===== */
     if (s.viewOnceReveal && !isStatus && isViewOnceMsg(m.message)) {
@@ -176,16 +201,17 @@ export function attachGuards(sock, tgId, hooks = {}) {
       let buf = null;
       if (media) {
         try {
-          buf = await dlBuffer(sock, m); // تحميل مسبق حتى تُرسل الوسائط بعد الحذف
+          buf = await dlBuffer(sock, m);
         } catch (e) {
           log(`تعذر تحميل وسائط الرسالة مسبقاً: ${e.message}`);
         }
       }
       cacheFor(msgCache, tgId).set(key.id, {
-        m: { key: key, pushName: m.pushName, message: m.message },
+        m: { key, pushName: m.pushName, message: m.message, senderPn: m.senderPn, participant: m.participant },
         buf,
         mime: media?.mime || null,
         kind: media?.kind || null,
+        filename: media?.filename || null,
         ts: Date.now()
       });
     }
@@ -202,10 +228,11 @@ export function attachGuards(sock, tgId, hooks = {}) {
         }
       }
       cacheFor(statusCache, tgId).set(key.id, {
-        m: { key: key, pushName: m.pushName, message: m.message },
+        m: { key, pushName: m.pushName, message: m.message, participantAlt: key.participantAlt },
         buf,
         mime: media?.mime || null,
         kind: media?.kind || null,
+        filename: media?.filename || null,
         ts: Date.now()
       });
     }
@@ -217,30 +244,47 @@ export function attachGuards(sock, tgId, hooks = {}) {
     const delKey = pm.key || {};
     const id = delKey.id;
     const entry = cacheFor(msgCache, tgId).get(id);
-    const actor = realNumber(pmMsg); // من نفّذ الحذف
-    const sender = delKey.participant ? realNumber({ key: delKey }) : jidToNumber(delKey.remoteJid || '');
-    const chat = delKey.remoteJid || '';
-    const deletedAt = pm.timestampMs ? new Date(Number(pm.timestampMs)).toLocaleString('ar-EG') : timeNow();
 
-    let text =
-      `🛡 <b>تم حذف رسالة لدى الجميع!</b>\n` +
+    // صاحب الرسالة: من ذاكرة الرسالة أولاً ثم من مفتاح الحذف
+    const sender = entry
+      ? realNumberFromKey(entry.m.key, entry.m)
+      : realNumberFromKey(delKey);
+    const actor = realNumberFromKey(pmMsg.key || {}, pmMsg) || realNumber(pmMsg);
+
+    const text =
+      `🛡 *تم حذف رسالة لدى الجميع!*\n` +
       `━━━━━━━━━━━━━━━\n` +
-      `👤 صاحب الرسالة: <b>${escapeHtml(entry?.m?.pushName || senderName(pmMsg))}</b>\n` +
-      `📱 رقمه الفعلي: <code>+${sender || 'غير معروف'}</code>\n` +
-      `🧹 حذفها: <code>+${actor || 'غير معروف'}</code>\n` +
-      `💬 المحادثة: ${chatLabel(chat)}\n` +
-      `🕒 وقت الحذف: ${deletedAt}\n` +
-      `🆔 معرف الرسالة: <code>${escapeHtml(id || '—')}</code>\n`;
+      `👤 صاحب الرسالة: *${entry?.m?.pushName || senderName(pmMsg)}*\n` +
+      `📱 رقمه الفعلي: ${fmtNum(sender)}\n` +
+      `🧹 حذفها: ${fmtNum(actor)}\n` +
+      `💬 النوع: ${chatLabel(delKey.remoteJid)}\n` +
+      `🕒 وقت الحذف: ${timeNow()}\n` +
+      `📎 المحتوى: ${entry?.kind || (entry && msgTextOf(entry.m.message) ? 'نص ✍️' : 'غير معروف (قبل التخزين)')}`;
 
     const origText = entry ? msgTextOf(entry.m.message) : '';
-    if (origText) text += `📝 النص الأصلي:\n${origText.slice(0, 1500)}\n`;
-    text += `📎 النوع: ${entry?.kind || (origText ? 'نص ✍️' : 'غير معروف (الحذف قبل التخزين أو الميزة كانت متوقفة)')}`;
+    const caption = origText ? `${text}\n\n📝 النص الأصلي:\n${origText.slice(0, 1500)}` : text;
 
-    if (entry?.buf?.length) {
-      await notifyMedia(tgId, entry.buf, entry.mime || 'application/octet-stream', text);
-    } else {
-      notify(tgId, text);
-    }
+    const media = entry?.buf?.length
+      ? { buf: entry.buf, mime: entry.mime || 'application/octet-stream', filename: entry.filename }
+      : null;
+
+    await alert.send(
+      `del:${tgId}:${id}`,
+      {
+        title: '🛡 تم حذف رسالة لدى الجميع!',
+        fields: [
+          { icon: '👤', label: 'صاحب الرسالة', value: entry?.m?.pushName || senderName(pmMsg) },
+          { icon: '📱', label: 'رقمه الفعلي', value: fmtNum(sender), code: false },
+          { icon: '🧹', label: 'حذفها', value: fmtNum(actor) },
+          { icon: '💬', label: 'النوع', value: chatLabel(delKey.remoteJid) },
+          { icon: '🕒', label: 'وقت الحذف', value: timeNow() },
+          { icon: '📎', label: 'المحتوى', value: entry?.kind || (origText ? 'نص ✍️' : 'غير معروف') }
+        ],
+        notes: origText ? [`📝 النص الأصلي:`, origText.slice(0, 1500)] : []
+      },
+      media
+    );
+
     cacheFor(msgCache, tgId).delete(id);
   }
 
@@ -250,26 +294,32 @@ export function attachGuards(sock, tgId, hooks = {}) {
     const delKey = pm.key || {};
     const id = delKey.id;
     const entry = cacheFor(statusCache, tgId).get(id);
-    const sender = realNumber({ key: delKey });
-    const sender2 = sender && sender !== 'undefined' ? sender : realNumber(pmMsg);
 
-    let text =
-      `📸 <b>تم حذف حالة واتساب!</b>\n` +
-      `━━━━━━━━━━━━━━━\n` +
-      `👤 صاحب الحالة: <b>${escapeHtml(entry?.m?.pushName || senderName(pmMsg))}</b>\n` +
-      `📱 رقمه الفعلي: <code>+${sender2 || 'غير معروف'}</code>\n` +
-      `🕒 وقت الحذف: ${timeNow()}\n` +
-      `🆔 معرف الحالة: <code>${escapeHtml(id || '—')}</code>\n`;
+    const sender =
+      realNumberFromKey(delKey, pmMsg) ||
+      (entry ? realNumberFromKey(entry.m.key, entry.m) : '') ||
+      realNumber(pmMsg);
 
     const origText = entry ? msgTextOf(entry.m.message) : '';
-    if (origText) text += `📝 نص الحالة:\n${origText.slice(0, 1500)}\n`;
-    text += `📎 النوع: ${entry?.kind || (origText ? 'نص ✍️' : 'غير معروف')}`;
+    const media = entry?.buf?.length
+      ? { buf: entry.buf, mime: entry.mime || 'application/octet-stream', filename: entry.filename }
+      : null;
 
-    if (entry?.buf?.length) {
-      await notifyMedia(tgId, entry.buf, entry.mime || 'application/octet-stream', text);
-    } else {
-      notify(tgId, text);
-    }
+    await alert.send(
+      `status:${tgId}:${id}`,
+      {
+        title: '📸 تم حذف حالة واتساب!',
+        fields: [
+          { icon: '👤', label: 'صاحب الحالة', value: entry?.m?.pushName || senderName(pmMsg) },
+          { icon: '📱', label: 'رقمه الفعلي', value: fmtNum(sender) },
+          { icon: '🕒', label: 'وقت الحذف', value: timeNow() },
+          { icon: '📎', label: 'النوع', value: entry?.kind || (origText ? 'نص ✍️' : 'غير معروف') }
+        ],
+        notes: origText ? [`📝 نص الحالة:`, origText.slice(0, 1500)] : []
+      },
+      media
+    );
+
     cacheFor(statusCache, tgId).delete(id);
   }
 
@@ -277,30 +327,32 @@ export function attachGuards(sock, tgId, hooks = {}) {
   async function revealViewOnce(m) {
     const media = mediaNodeOf(m.message);
     const from = realNumber(m);
-    let text =
-      `👁 <b>تم كشف رسالة «العرض لمرة واحدة»!</b>\n` +
-      `━━━━━━━━━━━━━━━\n` +
-      `👤 المرسل: <b>${escapeHtml(senderName(m))}</b>\n` +
-      `📱 رقمه الفعلي: <code>+${from || 'غير معروف'}</code>\n` +
-      `💬 المحادثة: ${chatLabel(m.key.remoteJid)}\n` +
-      `🕒 الوقت: ${timeNow()}\n` +
-      `📎 النوع: ${media?.kind || 'نص ✍️'}`;
-
     const t = msgTextOf(m.message);
-    if (t) text += `\n📝 النص: ${t.slice(0, 800)}`;
 
+    let buf = null;
     if (media) {
       try {
-        const buf = await dlBuffer(sock, m);
-        if (buf?.length) {
-          await notifyMedia(tgId, buf, media.mime || 'application/octet-stream', text);
-          return;
-        }
+        buf = await dlBuffer(sock, m);
       } catch (e) {
         log(`viewOnce: تعذر تنزيل الوسائط — ${e.message}`);
       }
     }
-    notify(tgId, text);
+
+    await alert.send(
+      `von:${tgId}:${m.key?.id}`,
+      {
+        title: '👁 تم كشف رسالة «العرض لمرة واحدة»!',
+        fields: [
+          { icon: '👤', label: 'المرسل', value: senderName(m) },
+          { icon: '📱', label: 'رقمه الفعلي', value: fmtNum(from) },
+          { icon: '💬', label: 'النوع', value: chatLabel(m.key?.remoteJid) },
+          { icon: '🕒', label: 'الوقت', value: timeNow() },
+          { icon: '📎', label: 'المحتوى', value: media?.kind || 'نص ✍️' }
+        ],
+        notes: t ? [`📝 النص:`, t.slice(0, 800)] : []
+      },
+      buf?.length ? { buf, mime: media?.mime || 'application/octet-stream', filename: media?.filename } : null
+    );
   }
 }
 

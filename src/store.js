@@ -18,7 +18,7 @@ export const DEFAULT_SETTINGS = {
   emojis: ['❤️', '🔥', '👏', '😍', '💯', '😂', '🙏', '💚'],
   protection: true, // وضع الحماية (تقييد السرعة + تجاهل الرسائل الجماعية)
   antiDelete: false, // إعادة إرسال الرسائل المحذوفة (للمجموعات الخاصة)
-  waAntiDelete: false, // كشف حذف الرسائل «لدى الجميع» وإرسالها كاملة للمحادثة
+  waAntiDelete: false, // كشف حذف الرسائل «لدى الجميع» وإرسالها كاملة
   statusAntiDelete: false, // عدم حذف حالات الواتساب — إرسال الحالة المحذوفة كاملة
   viewOnceReveal: false, // كشف الصور/الفيديو «العرض لمرة واحدة» وإرسالها
   autoReply: false, // ردود آلية
@@ -27,11 +27,16 @@ export const DEFAULT_SETTINGS = {
   groupWelcome: false,
   readReceipts: true, // إرسال إشعار القراءة
   typingSim: true, // محاكاة "يكتب..."
-  notifyStatusReaction: false, // إشعار تيليجرام "تم التفاعل على حالة" (معطّل افتراضياً)
-  delGuardMsgs: false, // التقاط حذف الرسائل لدى الجميع وإرسالها كاملة
-  delGuardStatus: false, // التقاط حذف حالات الواتس وإرسالها كاملة
-  revealViewOnce: false, // كشف رسائل "عرض مره واحده" وإرسالها كاملة
-  quietHours: { enabled: false, from: 2, to: 7 } // ساعات هدوء (لا تفاعل)
+  quietHours: { enabled: false, from: 2, to: 7 }, // ساعات هدوء (لا تفاعل)
+
+  // ===== التنبيهات (الجديد) =====
+  alertsOn: true, // إرسال تنبيهات الحذف/الحالات/العرض لمرة واحدة
+  alertsTo: CONFIG.ALERTS_TO || 'whatsapp', // whatsapp | telegram | both
+  alertOnce: true, // إرسال كل تنبيه لمرة واحدة فقط (منع التكرار)
+  notifyOnConnect: false, // رسالة "تم ربط الرقم بنجاح" — متوقفة افتراضياً
+  notifyWaCommands: false, // إشعار تنفيذ أوامر واتساب داخل تيليجرام — متوقف
+  notifyStatusReaction: false, // إشعار "تم التفاعل على حالة" — متوقف
+  alertsToSelfChat: true // إرسال التنبيه إلى محادثة الرقم المربوط نفسه
 };
 
 const EMPTY = () => ({ users: {}, global: { createdAt: Date.now() } });
@@ -39,9 +44,19 @@ const EMPTY = () => ({ users: {}, global: { createdAt: Date.now() } });
 const MIGRATIONS = [
   // ترقية قواعد بيانات قديمة: إضافة المفاتيح الجديدة دون حذف الإعدادات الموجودة
   (u) => {
-    for (const k of ['waAntiDelete', 'statusAntiDelete', 'viewOnceReveal']) {
-      if (u.settings[k] === undefined) u.settings[k] = DEFAULT_SETTINGS[k];
-    }
+    const keys = [
+      'waAntiDelete',
+      'statusAntiDelete',
+      'viewOnceReveal',
+      'alertsOn',
+      'alertsTo',
+      'alertOnce',
+      'notifyOnConnect',
+      'notifyWaCommands',
+      'notifyStatusReaction',
+      'alertsToSelfChat'
+    ];
+    for (const k of keys) if (u.settings[k] === undefined) u.settings[k] = DEFAULT_SETTINGS[k];
   }
 ];
 
@@ -60,6 +75,7 @@ function load() {
 
 function writeNow() {
   try {
+    fs.mkdirSync(path.dirname(FILE), { recursive: true });
     const tmp = `${FILE}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
     fs.renameSync(tmp, FILE);

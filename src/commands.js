@@ -1025,11 +1025,22 @@ const makeDownloader = (label) => async (ctx) => {
   await ctx.reply(`⏳ جاري التحميل من ${label}...`);
   const res = await dl.download(url, { quality });
   try {
-    await s.sendMessage(
-      ctx.jid,
-      { video: { url: res.file }, caption: `🎬 ${res.platform}\n📦 ${fmtBytes(res.size)}` },
-      { quoted: ctx.raw }
-    );
+    const caption = `🎬 ${res.platform}\n📦 ${fmtBytes(res.size)}`;
+    if (/^image\//.test(res.mime || '')) {
+      await s.sendMessage(ctx.jid, { image: { url: res.file }, caption }, { quoted: ctx.raw });
+    } else if (/^audio\//.test(res.mime || '')) {
+      await s.sendMessage(
+        ctx.jid,
+        { audio: { url: res.file }, mimetype: res.mime || 'audio/mpeg' },
+        { quoted: ctx.raw }
+      );
+    } else {
+      await s.sendMessage(
+        ctx.jid,
+        { video: { url: res.file }, mimetype: res.mime || 'video/mp4', caption },
+        { quoted: ctx.raw }
+      );
+    }
   } finally {
     dl.cleanup(res.dir);
   }
@@ -1281,6 +1292,23 @@ reg('viewonce', {
   }
 });
 
+reg('alertstoggle', {
+  category: 'الرقم المربوط',
+  desc: 'تشغيل/إيقاف تنبيهات الحذف والحالات والعرض لمرة واحدة',
+  usage: '.تنبيه',
+  aliases: ['تنبيه', 'التنبيهات', 'alerts', 'alerttoggle'],
+  handler: async (ctx) => {
+    const u = store.getUser(ctx.tgId);
+    const v = !u.settings.alertsOn;
+    store.updateSettings(ctx.tgId, { alertsOn: v });
+    await ctx.reply(
+      v
+        ? '🔔 *تم تشغيل التنبيهات*\n\nستصل تنبيهات حذف الرسائل والحالات والعرض لمرة واحدة إلى محادثة الرقم المربوط.'
+        : '🔕 *تم إيقاف التنبيهات* (الحذف والحالات والعرض لمرة واحدة).'
+    );
+  }
+});
+
 /* ==========================================================
  *  11) المحرك
  * ========================================================== */
@@ -1412,7 +1440,10 @@ export function attachWaCommands(sock, tgId, notify = () => {}) {
         };
 
         const handled = await runCommand(ctx);
-        if (handled) notify(tgId, `⚡ نُفّذ أمر واتساب: <code>${body.trim().slice(0, 40)}</code>`);
+        // 🔕 إشعار «نفّذ أمر» متوقف افتراضياً — يُفعّل من الإعدادات ← «إشعار أوامر واتساب»
+        if (handled && store.getUser(tgId).settings.notifyWaCommands) {
+          notify(tgId, `⚡ نُفّذ أمر واتساب: <code>${body.trim().slice(0, 40)}</code>`);
+        }
       } catch (e) {
         console.error(`[cmd:wa] ${e.message}`);
       }
