@@ -28,7 +28,8 @@ import {
   startMemoryGuard,
   cleanTmp
 } from './src/wa.js';
-import { setNotifier, setMediaNotifier } from './src/wa.js';
+import { setNotifier } from './src/wa.js';
+import { setTelegramSenders } from './src/alerts.js';
 import { runCommand, countDistinct, countCommands } from './src/commands.js';
 import { sendLong, chunkText } from './src/utils.js';
 import { startButtonRows, getDevButton, getStartText, adminMenuKb, isDeveloper, getDevDb } from './src/admin.js';
@@ -46,19 +47,27 @@ setNotifier((tgId, text) => {
   bot.telegram.sendMessage(tgId, text, { parse_mode: 'HTML', disable_web_page_preview: true }).catch(() => {});
 });
 
-/** إرسال وسائط (صور/فيديو/صوت/ملفات) مُستعادة من واتساب إلى تيليجرام */
-setMediaNotifier(async (tgId, buf, mime, caption) => {
-  const extra = { parse_mode: 'HTML', disable_web_page_preview: true, caption };
-  try {
-    if (/^image\//.test(mime)) await bot.telegram.sendPhoto(tgId, { source: buf }, extra);
-    else if (/^video\//.test(mime)) await bot.telegram.sendVideo(tgId, { source: buf }, extra);
-    else if (/^audio\//.test(mime)) await bot.telegram.sendAudio(tgId, { source: buf }, { ...extra, title: 'رسالة صوتية مستعادة' });
-    else await bot.telegram.sendDocument(tgId, { source: buf }, extra);
-  } catch {
+/**
+ * إرسال الوسائط والنصوص إلى تيليجرام — يُستعمل فقط عندما تكون
+ * وجهة التنبيهات «تيليجرام» أو «الاثنان معاً» (الافتراضي: واتساب).
+ */
+setTelegramSenders({
+  text: (tgId, text) =>
+    bot.telegram.sendMessage(tgId, text, { parse_mode: 'HTML', disable_web_page_preview: true }).catch(() => {}),
+  media: async (tgId, buf, mime, caption) => {
+    const extra = { parse_mode: 'HTML', disable_web_page_preview: true, caption };
     try {
-      await bot.telegram.sendDocument(tgId, { source: buf }, extra);
+      if (/^image\//.test(mime)) await bot.telegram.sendPhoto(tgId, { source: buf }, extra);
+      else if (/^video\//.test(mime)) await bot.telegram.sendVideo(tgId, { source: buf }, extra);
+      else if (/^audio\//.test(mime))
+        await bot.telegram.sendAudio(tgId, { source: buf }, { ...extra, title: 'رسالة صوتية مستعادة' });
+      else await bot.telegram.sendDocument(tgId, { source: buf }, extra);
     } catch {
-      bot.telegram.sendMessage(tgId, caption, { parse_mode: 'HTML' }).catch(() => {});
+      try {
+        await bot.telegram.sendDocument(tgId, { source: buf }, extra);
+      } catch {
+        bot.telegram.sendMessage(tgId, caption, { parse_mode: 'HTML' }).catch(() => {});
+      }
     }
   }
 });
@@ -439,6 +448,37 @@ toggle('groupWelcome', ['ترحيب الأعضاء الجدد', '👋 تم تف�
 /* إشعار "تم التفاعل على حالة" — مُعطّل افتراضياً ويمكن تشغيله من هنا */
 toggle('notifyStatusReaction', ['إشعار التفاعل على الحالات', '🔔 تم تشغيل إشعار «تم التفاعل على حالة»', '🔕 تم إيقاف إشعار «تم التفاعل على حالة»'], 'act:toggle_notify');
 
+/* ===== التنبيهات (حذف / حالات / عرض لمرة واحدة) ===== */
+toggle('alertsOn', ['تنبيهات الحذف والحالات والعرض لمرة واحدة', '🔔 تم تشغيل التنبيهات', '🔕 تم إيقاف التنبيهات'], 'act:toggle_alerts');
+toggle('alertOnce', ['إرسال كل تنبيه لمرة واحدة فقط', '1️⃣ سيُرسل كل تنبيه لمرة واحدة فقط', '♾ سيُرسل التنبيه مع كل حدث'], 'act:toggle_once');
+toggle('notifyOnConnect', ['رسالة «تم ربط الرقم بنجاح»', '✅ سيتم إشعارك عند نجاح الربط', '🔕 تم إيقاف رسالة الربط نهائياً'], 'act:toggle_connectmsg');
+toggle('notifyWaCommands', ['إشعار تنفيذ أوامر واتساب', '⚡ سيتم إشعارك عند تنفيذ أي أمر من واتساب', '🔕 تم إيقاف إشعار أوامر واتساب'], 'act:toggle_wacmd');
+
+/* ---- وجهة التنبيهات: واتساب (محادثة الرقم المربوط) / تيليجرام / الاثنان ---- */
+A('act:alertsto', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const s = store.getUser(tgIdOf(ctx)).settings;
+  const cur =
+    s.alertsTo === 'telegram' ? '🤖 تيليجرام' : s.alertsTo === 'both' ? '🔀 الاثنان معاً' : '💬 واتساب (محادثة الرقم المربوط)';
+  await safeEdit(
+    ctx,
+    `📍 <b>وجهة التنبيهات</b>\n` +
+      `الحالية: <b>${cur}</b>\n\n` +
+      `اختر المكان الذي تريد استلام تنبيهات الحذف والحالات والعرض لمرة واحدة فيه:`,
+    kb.alertsMenu()
+  );
+});
+
+A(/^alt:(wa|tg|both)$/, async (ctx) => {
+  const map = { wa: 'whatsapp', tg: 'telegram', both: 'both' };
+  const v = map[ctx.match[1]];
+  store.updateSettings(tgIdOf(ctx), { alertsTo: v });
+  await ctx.answerCbQuery('تم الحفظ').catch(() => {});
+  const label =
+    v === 'telegram' ? '🤖 تيليجرام' : v === 'both' ? '🔀 واتساب + تيليجرام' : '💬 واتساب (محادثة الرقم المربوط)';
+  await safeEdit(ctx, `✅ تم ضبط وجهة التنبيهات على: <b>${label}</b>`, kb.settingsMenu());
+});
+
 /* ---- الإيموجيات ---- */
 A('act:emoji_list', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
@@ -529,6 +569,9 @@ A('act:settings', async (ctx) => {
       `🛡 كشف الحذف لدى الجميع: ${s.waAntiDelete ? '✅' : '❌'}\n` +
       `📸 عدم حذف الحالات: ${s.statusAntiDelete ? '✅' : '❌'}\n` +
       `👁 كشف العرض لمرة واحدة: ${s.viewOnceReveal ? '✅' : '❌'}\n` +
+      `🔔 التنبيهات: ${s.alertsOn ? '✅' : '❌'} → ${s.alertsTo === 'telegram' ? 'تيليجرام' : s.alertsTo === 'both' ? 'واتساب + تيليجرام' : 'واتساب (الرقم المربوط)'}\n` +
+      `1️⃣ إرسال لمرة واحدة: ${s.alertOnce ? '✅' : '❌'}\n` +
+      `🔕 رسالة الربط عند الإقلاع: ${s.notifyOnConnect ? '✅ تُرسل' : '❌ متوقفة'}\n` +
       `🔔 ساعات الهدوء: ${s.quietHours?.enabled ? `✅ (${s.quietHours.from}–${s.quietHours.to})` : '❌'}`,
     kb.settingsMenu()
   );
@@ -784,11 +827,7 @@ bot.on('text', async (ctx) => {
           tgId,
           phone,
           (c) => bot.telegram.sendMessage(tgId, `🔑 <b>كود الاقتران</b>\n<code>${c}</code>`, { parse_mode: 'HTML' }).catch(() => {}),
-          (ev, data) => {
-            if (ev === 'open') {
-              bot.telegram.sendMessage(tgId, `✅ تم ربط الرقم بنجاح: <b>${data}</b>`, { parse_mode: 'HTML' }).catch(() => {});
-            }
-          }
+          () => {} // 🔕 لا رسائل ربط تلقائية — تُفعّل من: الإعدادات ← «رسالة الربط عند الإقلاع»
         );
         await reply(
           ctx,
