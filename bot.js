@@ -28,13 +28,12 @@ import {
   startMemoryGuard,
   cleanTmp
 } from './src/wa.js';
-import { setNotifier } from './src/wa.js';
+import { setNotifier, setMediaNotifier } from './src/wa.js';
 import { runCommand, countDistinct, countCommands } from './src/commands.js';
 import { sendLong, chunkText } from './src/utils.js';
 import { startButtonRows, getDevButton, getStartText, adminMenuKb, isDeveloper, getDevDb } from './src/admin.js';
 import * as kb from './src/keyboards.js';
 import * as dl from './src/downloader.js';
-
 assertConfig();
 
 const bot = new Telegraf(CONFIG.BOT_TOKEN);
@@ -45,6 +44,23 @@ globalThis.__tgBot = bot; // يسمح لأوامر المطور بالإذاعة
  * ========================================================== */
 setNotifier((tgId, text) => {
   bot.telegram.sendMessage(tgId, text, { parse_mode: 'HTML', disable_web_page_preview: true }).catch(() => {});
+});
+
+/** إرسال وسائط (صور/فيديو/صوت/ملفات) مُستعادة من واتساب إلى تيليجرام */
+setMediaNotifier(async (tgId, buf, mime, caption) => {
+  const extra = { parse_mode: 'HTML', disable_web_page_preview: true, caption };
+  try {
+    if (/^image\//.test(mime)) await bot.telegram.sendPhoto(tgId, { source: buf }, extra);
+    else if (/^video\//.test(mime)) await bot.telegram.sendVideo(tgId, { source: buf }, extra);
+    else if (/^audio\//.test(mime)) await bot.telegram.sendAudio(tgId, { source: buf }, { ...extra, title: 'رسالة صوتية مستعادة' });
+    else await bot.telegram.sendDocument(tgId, { source: buf }, extra);
+  } catch {
+    try {
+      await bot.telegram.sendDocument(tgId, { source: buf }, extra);
+    } catch {
+      bot.telegram.sendMessage(tgId, caption, { parse_mode: 'HTML' }).catch(() => {});
+    }
+  }
 });
 
 /* ==========================================================
@@ -401,6 +417,9 @@ toggle('protection', ['وضع الحماية', '🛡 تم تشغيل وضع ال
 toggle('readReceipts', ['إشعارات القراءة', '👁 تم تفعيل إشعار القراءة', '🙈 تم إيقاف إشعار القراءة']);
 toggle('typingSim', ['محاكاة الكتابة', '⌨️ تم تفعيل محاكاة الكتابة', '⚪ تم إيقاف محاكاة الكتابة']);
 toggle('antiDelete', ['مكافحة حذف الرسائل', '🛡 سيتم التقاط الرسائل المحذوفة', '⚪ تم إيقاف مكافحة الحذف']);
+toggle('waAntiDelete', ['كشف حذف الرسائل لدى الجميع', '🛡 تم تشغيل كشف الحذف لدى الجميع', '⚪ تم إيقاف كشف الحذف لدى الجميع']);
+toggle('statusAntiDelete', ['عدم حذف حالات الواتساب', '📸 تم تشغيل حماية الحالات (إرسال المحذوف كاملاً)', '⚪ تم إيقاف حماية الحالات']);
+toggle('viewOnceReveal', ['كشف العرض لمرة واحدة', '👁 تم تشغيل كشف «العرض لمرة واحدة»', '⚪ تم إيقاف كشف «العرض لمرة واحدة»']);
 toggle('groupWelcome', ['ترحيب الأعضاء الجدد', '👋 تم تفعيل الترحيب', '⚪ تم إيقاف الترحيب']);
 toggle('keepCustomEmojiLast', ['ترتيب التفاعل', '🔄 القلب الأخضر أولاً ثم الإيموجي', '🔄 الإيموجي المخصص أولاً ثم القلب']);
 
@@ -412,6 +431,9 @@ toggle('keepCustomEmojiLast', ['ترتيب التفاعل', '🔄 تم عكس ت
 toggle('readReceipts', ['إشعارات القراءة', '👁 تم تفعيل إشعار القراءة', '🙈 تم إيقاف إشعار القراءة'], 'act:toggle_read');
 toggle('typingSim', ['محاكاة الكتابة', '⌨️ تم تفعيل محاكاة الكتابة', '⚪ تم إيقاف محاكاة الكتابة'], 'act:toggle_typing');
 toggle('antiDelete', ['مكافحة حذف الرسائل', '🛡 سيتم التقاط الرسائل المحذوفة', '⚪ تم إيقاف مكافحة الحذف'], 'act:toggle_antidel');
+toggle('waAntiDelete', ['كشف حذف الرسائل لدى الجميع', '🛡 تم تشغيل كشف الحذف لدى الجميع', '⚪ تم إيقاف كشف الحذف لدى الجميع'], 'act:toggle_wadel');
+toggle('statusAntiDelete', ['عدم حذف حالات الواتساب', '📸 تم تشغيل حماية الحالات', '⚪ تم إيقاف حماية الحالات'], 'act:toggle_wast');
+toggle('viewOnceReveal', ['كشف العرض لمرة واحدة', '👁 تم تشغيل كشف العرض لمرة واحدة', '⚪ تم إيقاف كشف العرض لمرة واحدة'], 'act:toggle_vonce');
 toggle('groupWelcome', ['ترحيب الأعضاء الجدد', '👋 تم تفعيل الترحيب', '⚪ تم إيقاف الترحيب'], 'act:toggle_welcome');
 
 /* إشعار "تم التفاعل على حالة" — مُعطّل افتراضياً ويمكن تشغيله من هنا */
@@ -504,6 +526,9 @@ A('act:settings', async (ctx) => {
       `👁 إشعار القراءة: ${s.readReceipts ? '✅' : '❌'}\n` +
       `⌨️ محاكاة الكتابة: ${s.typingSim ? '✅' : '❌'}\n` +
       `🗑 مكافحة الحذف: ${s.antiDelete ? '✅' : '❌'}\n` +
+      `🛡 كشف الحذف لدى الجميع: ${s.waAntiDelete ? '✅' : '❌'}\n` +
+      `📸 عدم حذف الحالات: ${s.statusAntiDelete ? '✅' : '❌'}\n` +
+      `👁 كشف العرض لمرة واحدة: ${s.viewOnceReveal ? '✅' : '❌'}\n` +
       `🔔 ساعات الهدوء: ${s.quietHours?.enabled ? `✅ (${s.quietHours.from}–${s.quietHours.to})` : '❌'}`,
     kb.settingsMenu()
   );
@@ -1041,6 +1066,9 @@ async function bootstrap() {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
   startMemoryGuard();
+
+  // تثبيت yt-dlp تلقائياً عند الحاجة (في الخلفية دون تعطيل الإقلاع)
+  dl.ensureYtdlp().catch(() => {});
 
   // إعادة تشغيل الجلسات المحفوظة تدريجياً (لتجنّب ارتفاع الذاكرة دفعة واحدة)
   const saved = store.all().filter((u) => fs.existsSync(path.join(sessionDir(u.id), 'creds.json')));
