@@ -1,0 +1,7 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "deploy": {
+    "startCommand": "python \"tiktok_store_bot_fixed_instagram_video_sound_patch (10).py\"",
+    "restartPolicyType": "ON_FAILURE"
+  }
+}
